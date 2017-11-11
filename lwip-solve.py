@@ -172,7 +172,7 @@ state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 
 state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) == 0x11223344) # seqno
 state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) == 0x55667788) # ackno
 symvar_tcp_dataofs = state.solver.Extract(tcp_header_offset + 96 + 7, tcp_header_offset + 96 + 4, symvar_pbuf_payload)
-state.solver.add(state.se.And(symvar_tcp_dataofs >= 5, symvar_tcp_dataofs <= 15)) # tcp length
+state.add_constraints(state.se.And(symvar_tcp_dataofs >= 5, symvar_tcp_dataofs <= 15)) # tcp length
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
 ### debugging
@@ -241,17 +241,17 @@ if IS_ROOT and PACKET_NO == -1:
     usage()
 """)
 for i, found in enumerate(simgr.found):
-    _len = state.se.eval(symvar_pbuf_tot_len)
+    _len = found.se.eval(symvar_pbuf_tot_len)
     print "found #%d: pbuf.tot_len: %#x (%d)" % (i, _len, _len)
-    _len = state.se.eval(symvar_pbuf_len)
+    _len = found.se.eval(symvar_pbuf_len)
     print "found #%d: pbuf.len: %#x (%d)" % (i, _len, _len)
-    print "found #%d: pbuf.payload: " % (i)
-    v = found.solver.eval(found.se.Reverse(symvar_pbuf_payload), cast_to=str)
+    print "found #%d: pbuf.payload (= L2 Payload): " % (i)
+    v = found.se.eval(found.se.Reverse(symvar_pbuf_payload), cast_to=str)
     # v = memory_dump(pbuf_payload_ptr, 0x100)
     hexdump.hexdump(v)
     result.write("""
 ### this is Packet #{no:d}
-print("[*] ==== [packet #{no:d}] ====")
+print("[*] ==== [Packet #{no:d}] ====")
 print("found #{no:d}: pbuf.payload:")
 v = pickle.loads({dump!r})
 p = IP(_pkt=v)
