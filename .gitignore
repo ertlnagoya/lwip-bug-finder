@@ -1,0 +1,7 @@
+result.py
+trace/*
+bin/*
+*.pyc
+*.bak
+*.mpg
+.[0-9]*
