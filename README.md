@@ -37,7 +37,7 @@ Tips
 ### about `./trace` directory
 angr's state history is visualized in this directory (saved as {dot,png} file). Let's check!
 
-### `./prepare.py`
+### `./preprocess.py`
 This is helper script. Running this script is required by `lwip-solve.py`. Don't worry, `lwip-solve.py` mentions how to run. Follow his instructions.
 
 ### `lwip-solve-test.py`
