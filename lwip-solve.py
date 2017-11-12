@@ -157,7 +157,8 @@ state.memory.store(pbuf_len, state.se.Reverse(symvar_pbuf_len))
 state.add_constraints(symvar_pbuf_tot_len == symvar_pbuf_len)
 
 ### add constraints for a packet
-symvar_pbuf_payload = state.se.BVS('pbuf_payload', 0x100 * 8)
+L2_PAYLOAD_MAX_LEN = 1500 # 1518 (max Ether frame size) - 14 (address) - 4 (FCS)
+symvar_pbuf_payload = state.se.BVS('pbuf_payload', L2_PAYLOAD_MAX_LEN * 8)
 n = symvar_pbuf_payload.size()
 bits = [state.se.Extract(i, i, symvar_pbuf_payload) for i in range(n)]
 tcp_header_offset = 5 * 4 * 8
@@ -215,17 +216,40 @@ import pickle
 try:
     from scapy.all import *
 except ImportError:
-    print "[!] `pip install scapy` first! exit."
+    print("[!] `pip install scapy` first! exit.")
     exit(1)
 
 def usage():
     cmd_name = sys.argv[0]
-    print "usage: [sudo] %s [PACKET_NO]" % cmd_name
-    print "\\tto preview packet: %s" % cmd_name
-    print "\\tto send packet: sudo %s PACKET_NO" % cmd_name
-    print ""
-    print "PACKET_NO of packets are indicated in this script."
+    print("usage: [sudo] %s [PACKET_NO]" % cmd_name)
+    print("\\tto preview packet: %s" % cmd_name)
+    print("\\tto send packet: sudo %s PACKET_NO" % cmd_name)
+    print("")
+    print("PACKET_NO of packets are indicated in this script.")
     exit()
+
+def recalc_chksums(p):
+    if p.haslayer(IP):
+        p[IP].chksum = None # to recalculate checksum
+    if p.haslayer(TCP):
+        p[TCP].chksum = None # to recalculate checksum
+    fnull = open(os.devnull, 'w')
+    fout = sys.stdout
+    sys.stdout = fnull # disable output
+    p.show2() # recalculate checksum
+    sys.stdout = fout # enable output
+
+def eth_type(p):
+    eth_type = 0
+    if p.haslayer(IP):
+        if p[IP].version == 4:
+            eth_type = 0x0800 # IPv4
+        elif p[IP].version == 6:
+            eth_type = 0x0806 # IPv6
+    elif p.haslayer(ARP):
+        eth_type = 0x0806
+    assert(eth_type > 0)
+    return eth_type
 
 IS_ROOT = (os.geteuid() == 0)
 PACKET_NO = -1
@@ -245,29 +269,34 @@ for i, found in enumerate(simgr.found):
     print "found #%d: pbuf.tot_len: %#x (%d)" % (i, _len, _len)
     _len = found.se.eval(symvar_pbuf_len)
     print "found #%d: pbuf.len: %#x (%d)" % (i, _len, _len)
+    l2_payload_len = _len
     print "found #%d: pbuf.payload (= L2 Payload): " % (i)
     v = found.se.eval(found.se.Reverse(symvar_pbuf_payload), cast_to=str)
-    # v = memory_dump(pbuf_payload_ptr, 0x100)
-    hexdump.hexdump(v)
+    hexdump.hexdump(v[:l2_payload_len])
     result.write("""
+
 ### this is Packet #{no:d}
 print("[*] ==== [Packet #{no:d}] ====")
 print("found #{no:d}: pbuf.payload:")
+l2_payload_len = {len:}
 v = pickle.loads({dump!r})
 p = IP(_pkt=v)
 # p[IP].ttl = 64
 # p[IP].window = 8192
-p[IP].chksum = None # to recalculate checksum
-p[TCP].chksum = None # to recalculate checksum
-p.show2() # recalculate checksum
+
+recalc_chksums(p)
+p.show()
+b = bytes(p)[:l2_payload_len] # trim unused padding
+
 if IS_ROOT and PACKET_NO == {no:d}: # send mode
     ### write your script here...
-    send(p)
+    ### send(p) trims padding automically, so I use this one
+    sendp(Ether(dst="11:45:14:11:45:14", type=eth_type(p))/b, iface="tap0")
 else: # preview mode
     ### write your script here...
-    # hexdump(p)
+    hexdump(b)
     pass
-""".format(no=i, dump=pickle.dumps(v)))
+""".format(no=i, dump=pickle.dumps(v), len=l2_payload_len))
     print "found #%d: pbuf:" % (i)
     v = memory_dump(found, pbuf_ptr, 0x20)
     hexdump.hexdump(v)
