@@ -95,9 +95,14 @@ relative_addr = lambda x: proj.loader.find_symbol(x).relative_addr
 ELF_FILE = "./bin/simhost-STABLE-1_3_0"
 proj = angr.Project(ELF_FILE, load_options={'auto_load_libs': False})
 start_addr = rebased_addr('tcp_input')
+# start_addr = rebased_addr('udp_input')
 print "[*] analysis start: %#x" % start_addr
 ### create blank state (initial state)
 state = proj.factory.blank_state(addr=start_addr)
+
+### helper boolean
+tcp = (start_addr == rebased_addr('tcp_input'))
+udp = (start_addr == rebased_addr('udp_input'))
 
 ### load preprocessed data
 from preprocess import Info, Symbol
@@ -119,7 +124,7 @@ try:
     ### nop function x() calls
     funcs = [
     "tcp_debug_print_flags", "tcp_debug_print",
-    "pbuf_free",
+    "udp_debug_print", # debug output
     "tcp_process", # tcp state machine
     "inet_chksum_pseudo",
     ]
@@ -140,6 +145,7 @@ pbuf_ptr = 0x20000000
 pbuf_payload_ptr = pbuf_ptr + 0x8
 pbuf_tot_len = pbuf_ptr + 0x10
 pbuf_len = pbuf_ptr + 0x12
+pbuf_type = pbuf_ptr + 0x14
 pbuf_payload = 0x20000100
 state.mem[pbuf_payload_ptr].qword = pbuf_payload
 
@@ -151,10 +157,19 @@ state.memory.store(pbuf_tot_len, symvar_pbuf_tot_len)
 ### symbolize pbuf.len
 symvar_pbuf_len = state.se.BVS('pbuf_len', 16)
 ### limit `<= 256` avoids 'IP (len %d) is longer than pbuf (len 256), IP packet dropped.''
-state.add_constraints(state.se.And(symvar_pbuf_len > 20, symvar_pbuf_len <= 256))
+l4_min_len = 0
+if tcp:
+    l4_min_len = 20
+elif udp:
+    l4_min_len = 64 / 8
+state.add_constraints(state.se.And(symvar_pbuf_len >= 20 + l4_min_len, symvar_pbuf_len <= 256))
 # state.add_constraints(state.se.And(symvar_pbuf_len > 20 + 40, symvar_pbuf_len <= 256)) # minimum size of IP + TCP
 state.memory.store(pbuf_len, state.se.Reverse(symvar_pbuf_len))
 state.add_constraints(symvar_pbuf_tot_len == symvar_pbuf_len)
+
+### symbolize pbuf.type
+symvar_pbuf_type = state.se.BVS('pbuf_type', 8)
+state.memory.store(pbuf_type, state.se.Reverse(symvar_pbuf_type))
 
 ### add constraints for a packet
 L2_PAYLOAD_MAX_LEN = 1500 # 1518 (max Ether frame size) - 14 (address) - 4 (FCS)
@@ -165,23 +180,47 @@ tcp_header_offset = 5 * 4 * 8
 state.add_constraints(state.se.Extract(7, 0, symvar_pbuf_payload) == 0x45) # ip version & ip header size (IPHL)
 state.add_constraints(state.se.Reverse(state.se.Extract(31, 16, symvar_pbuf_payload)) == symvar_pbuf_len) # Total Length in IP header
 state.add_constraints(state.se.Extract(32 * 2 + 7, 32 * 2 + 0, symvar_pbuf_payload) > 0) # TTL
-state.add_constraints(state.se.Extract(32 * 2 + 15, 32 * 2 + 8, symvar_pbuf_payload) == 6) # ip proto (TCP = 6)
+symvar_ip_proto = state.se.Extract(32 * 2 + 15, 32 * 2 + 8, symvar_pbuf_payload)
+if tcp:
+    state.add_constraints(symvar_ip_proto == 6) # ip proto (TCP = 6, UDP = 0x11)
+elif udp:
+    state.add_constraints(symvar_ip_proto == 0x11) # ip proto (TCP = 6, UDP = 0x11)
+else:
+    state.add_constraints(state.se.Or(symvar_ip_proto == 6, symvar_ip_proto == 0x11)) # ip proto (TCP = 6, UDP = 0x11)
 state.add_constraints(state.se.Reverse(state.se.Extract(32 * 3 + 31, 32 * 3 + 0, symvar_pbuf_payload)) == 0xc0a80001) # ip src (192.168.0.1)
 state.add_constraints(state.se.Reverse(state.se.Extract(32 * 4 + 31, 32 * 4 + 0, symvar_pbuf_payload)) == 0xc0a80002) # ip dest (192.168.0.2)
-state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0xf, tcp_header_offset + 0x0, symvar_pbuf_payload)) == 20) # src port
-state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x1f, tcp_header_offset + 0x10, symvar_pbuf_payload)) == 80) # dst port
-state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) == 0x11223344) # seqno
-state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) == 0x55667788) # ackno
-symvar_tcp_dataofs = state.solver.Extract(tcp_header_offset + 96 + 7, tcp_header_offset + 96 + 4, symvar_pbuf_payload)
-state.add_constraints(state.se.And(symvar_tcp_dataofs >= 5, symvar_tcp_dataofs <= 15)) # tcp length
+if tcp:
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0xf, tcp_header_offset + 0x0, symvar_pbuf_payload)) > 0) # src port
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x1f, tcp_header_offset + 0x10, symvar_pbuf_payload)) == 80) # dst port
+fix_no = True
+fix_no = False
+if fix_no:
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) == 0x11223344) # seqno
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) == 0x55667788) # ackno
+else:
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) > 0) # seqno
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) > 0) # ackno
+if tcp:
+    symvar_tcp_dataofs = state.solver.Extract(tcp_header_offset + 96 + 7, tcp_header_offset + 96 + 4, symvar_pbuf_payload)
+    state.add_constraints(state.se.And(symvar_tcp_dataofs >= 5, symvar_tcp_dataofs <= 15)) # tcp length
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
+
+### symbolize netif variable (defined in simhost)
+netif = rebased_addr('netif')
+netif_size = info.symbols['netif'].size
+symvar_netif = state.se.BVS('netif', netif_size * 8)
+state.add_constraints(state.se.Reverse(state.se.Extract(8 * 8 - 1, 0, symvar_netif)) == 0) # next
+state.add_constraints(state.se.Reverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_netif)) == 0xc0a80002) # ip_addr
+state.add_constraints(state.se.Reverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_netif)) > 0) # netmask
+state.add_constraints(state.se.Reverse(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_netif)) == 0xc0a80001) # gw
+state.memory.store(netif, state.se.Reverse(symvar_netif))
 
 ### debugging
 dump_regs(state, _exit=False)
 
 RSP = 0x7fff1000
 state.regs.rdi = pbuf_ptr
-state.regs.rsi = 0 # inp_ptr
+state.regs.rsi = rebased_addr('netif') # inp_ptr
 
 ### load initial state to engine (Simulation Manager)
 simgr = proj.factory.simgr(state)
@@ -190,12 +229,15 @@ simgr = proj.factory.simgr(state)
 find, avoid = [], []
 ### (1) bug #24596; LWIP_ERROR("increment_magnitude <= p->len", (increment_magnitude <= p->len), return 1;);
 find += [rebased_addr('pbuf_header') + 0x9513 - relative_addr('pbuf_header')] # (1)
-# find += [rebased_addr('tcp_input') + 0x1d3e8 - 0x1c706] # non dropped return
-avoid += [rebased_addr('pbuf_header') + 0x9601 - relative_addr('pbuf_header')] # when pbuf_header returns 1
-avoid += [rebased_addr('tcp_input') + 0x1c85c - relative_addr('tcp_input')] # dropped
-avoid += [rebased_addr('tcp_input') + 0x1c9a4 - relative_addr('tcp_input')] # short packet
-# avoid += [rebased_addr('abort')]
-avoid += [rebased_addr('pbuf_free')]
+### (2) find other bugs
+find += [rebased_addr('abort')] # (2)
+# avoid += [rebased_addr('pbuf_free')]
+avoid += [rebased_addr('tcp_rst')]
+# avoid += [rebased_addr('pbuf_header') + 0x9608 - relative_addr('pbuf_header')] # bad pbuf type (This is not bug)
+# avoid += [rebased_addr('tcp_input') + 0x1c85c - relative_addr('tcp_input')] # dropped
+# avoid += [rebased_addr('tcp_input') + 0x1c9a4 - relative_addr('tcp_input')] # short packet
+# avoid += [rebased_addr('tcp_input') + 0x1c7c9 - relative_addr('tcp_input')] # short packet .. discarded
+# avoid += [rebased_addr('udp_input') + 0x202ad - relative_addr('udp_input')] # short udp diagram
 
 ### print finds / avoids
 print "[*] find = %s" % str(map(lambda x: hex(x), find))
@@ -208,9 +250,12 @@ print "[*] avoid = %s" % str(map(lambda x: hex(x), avoid))
 simgr.explore(find=find, avoid=avoid)
 print "[*] explore finished!!"
 
-### save results
-result = open("result.py", "w")
-result.write("""
+if len(simgr.found) > 0:
+    plot_trace()
+
+    ### save results
+    result = open("result.py", "w")
+    result.write("""
 import sys
 import pickle
 try:
@@ -264,23 +309,28 @@ if IS_ROOT and PACKET_NO == -1:
     print "[!] specify packet no"
     usage()
 """)
-for i, found in enumerate(simgr.found):
-    _len = found.se.eval(symvar_pbuf_tot_len)
-    print "found #%d: pbuf.tot_len: %#x (%d)" % (i, _len, _len)
-    _len = found.se.eval(symvar_pbuf_len)
-    print "found #%d: pbuf.len: %#x (%d)" % (i, _len, _len)
-    l2_payload_len = _len
-    print "found #%d: pbuf.payload (= L2 Payload): " % (i)
-    v = found.se.eval(found.se.Reverse(symvar_pbuf_payload), cast_to=str)
-    hexdump.hexdump(v[:l2_payload_len])
-    result.write("""
+    for i, found in enumerate(simgr.found):
+        print "found #%d: stdout:\n%r" % (i, found.posix.dumps(1))
+        print "found #%d: stderr:\n%r" % (i, found.posix.dumps(2))
+        v = found.se.eval(symvar_pbuf_tot_len)
+        print "found #%d: pbuf.tot_len: %#x (%d)" % (i, v, v)
+        v = found.se.eval(symvar_pbuf_len)
+        print "found #%d: pbuf.len: %#x (%d)" % (i, v, v)
+        l2_payload_len = v
+        v = found.se.eval(symvar_pbuf_type)
+        print "found #%d: pbuf.type: %#x (%d)" % (i, v, v)
+        print "found #%d: pbuf.payload (= L2 Payload): " % (i)
+        v = found.se.eval(found.se.Reverse(symvar_pbuf_payload), cast_to=str)
+        hexdump.hexdump(v[:l2_payload_len])
+        result.write("""
 
 ### this is Packet #{no:d}
 print("[*] ==== [Packet #{no:d}] ====")
 print("found #{no:d}: pbuf.payload:")
-l2_payload_len = {len:}
+l2_payload_len = {len:} # change this value if needed
 v = pickle.loads({dump!r})
 p = IP(_pkt=v)
+p[IP].len = l2_payload_len
 # p[IP].ttl = 64
 # p[IP].window = 8192
 
@@ -290,29 +340,33 @@ b = bytes(p)[:l2_payload_len] # trim unused padding
 
 if IS_ROOT and PACKET_NO == {no:d}: # send mode
     ### write your script here...
-    ### send(p) trims padding automically, so I use this one
+    ### send(p) trims padding automatically, so I use this one
     sendp(Ether(dst="11:45:14:11:45:14", type=eth_type(p))/b, iface="tap0")
 else: # preview mode
     ### write your script here...
     hexdump(b)
     pass
 """.format(no=i, dump=pickle.dumps(v), len=l2_payload_len))
-    print "found #%d: pbuf:" % (i)
-    v = memory_dump(found, pbuf_ptr, 0x20)
-    hexdump.hexdump(v)
-    tcphdr_val = found.mem[rebased_addr('tcphdr')].uint64_t.concrete
-    iphdr_val = found.mem[rebased_addr('iphdr')].uint64_t.concrete
-    print "found #%d: iphdr = %#x, tcphdr = %#x" % (i, iphdr_val, tcphdr_val)
-    print "found #%d: *iphdr:" % (i)
-    hexdump.hexdump(memory_dump(found, iphdr_val, 0x20))
-    print "found #%d: *tcphdr:" % (i)
-    hexdump.hexdump(memory_dump(found, tcphdr_val, 0x20))
-result.close()
-print "[*] attack packets are saved to result.py."
+        print "found #%d: pbuf:" % (i)
+        v = memory_dump(found, pbuf_ptr, 0x20)
+        hexdump.hexdump(v)
+        tcphdr_val = found.mem[rebased_addr('tcphdr')].uint64_t.concrete
+        iphdr_val = found.mem[rebased_addr('iphdr')].uint64_t.concrete
+        print "found #%d: iphdr = %#x, tcphdr = %#x" % (i, iphdr_val, tcphdr_val)
+        print "found #%d: *iphdr:" % (i)
+        hexdump.hexdump(memory_dump(found, iphdr_val, 0x20))
+        print "found #%d: *tcphdr:" % (i)
+        hexdump.hexdump(memory_dump(found, tcphdr_val, 0x20))
+    ### the end of iteration
+    result.close()
+    print ""
+    print "[*] attack packets are saved to result.py."
 
-### print final result (this can be comment outed)
-print ""
-print "[*] preview of attack packets"
-os.system("python2 result.py")
+    ### print final result (this can be comment outed)
+    print ""
+    print "[*] preview of attack packets"
+    os.system("python2 result.py")
+else:
+    print "[!] no outcomes;("
 
 ### you can send generated packets with result.py. enjoy:)

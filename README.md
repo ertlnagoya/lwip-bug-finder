@@ -3,6 +3,7 @@ lwip bug finder
 
 Finds bugs with symbolic execution!
 
+
 Requirements
 ----
 * Python2
@@ -16,7 +17,12 @@ Requirements
 
 Installation
 ----
-### build simhost with each versions of lwip
+### git clone
+```bash
+git clone  --recursive https://github.com/ertlnagoya/lwip-bug-finder.git
+```
+
+### build simhost with each versions of lwip (NOT WORKING)
 `build-full-version-simhost.sh` builds simhosts to `./bin`.
 
 I git added my `simhost-STABLE-1_3_0`.
