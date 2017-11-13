@@ -174,8 +174,6 @@ state.memory.store(pbuf_type, state.se.Reverse(symvar_pbuf_type))
 ### add constraints for a packet
 L2_PAYLOAD_MAX_LEN = 1500 # 1518 (max Ether frame size) - 14 (address) - 4 (FCS)
 symvar_pbuf_payload = state.se.BVS('pbuf_payload', L2_PAYLOAD_MAX_LEN * 8)
-# n = symvar_pbuf_payload.size()
-# bits = [state.se.Extract(i, i, symvar_pbuf_payload) for i in range(n)]
 tcp_header_offset = 5 * 4 * 8
 state.add_constraints(state.se.Extract(7, 0, symvar_pbuf_payload) == 0x45) # ip version & ip header size (IPHL)
 state.add_constraints(state.se.Reverse(state.se.Extract(31, 16, symvar_pbuf_payload)) == symvar_pbuf_len) # Total Length in IP header

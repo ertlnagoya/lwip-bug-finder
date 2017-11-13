@@ -99,6 +99,10 @@ print "[*] analysis start: %#x" % start_addr
 ### create blank state (initial state)
 state = proj.factory.blank_state(addr=start_addr)
 
+### helper boolean
+tcp = (start_addr == rebased_addr('tcp_input'))
+udp = (start_addr == rebased_addr('udp_input'))
+
 ### load preprocessed data
 from preprocess import Info, Symbol
 INFO_FILE = ELF_FILE + ".info"
@@ -119,7 +123,7 @@ try:
     ### nop function x() calls
     funcs = [
     "tcp_debug_print_flags", "tcp_debug_print",
-    "pbuf_free",
+    "udp_debug_print", # debug output
     "tcp_process", # tcp state machine
     "inet_chksum_pseudo",
     ]
@@ -151,29 +155,42 @@ state.memory.store(pbuf_tot_len, symvar_pbuf_tot_len)
 ### symbolize pbuf.len
 symvar_pbuf_len = state.se.BVS('pbuf_len', 16)
 ### limit `<= 256` avoids 'IP (len %d) is longer than pbuf (len 256), IP packet dropped.''
-state.add_constraints(state.se.And(symvar_pbuf_len > 20, symvar_pbuf_len <= 256))
-# state.add_constraints(state.se.And(symvar_pbuf_len > 20 + 40, symvar_pbuf_len <= 256)) # minimum size of IP + TCP
+l4_min_len = 0
+if tcp:
+    l4_min_len = 20
+elif udp:
+    l4_min_len = 64 / 8
+state.add_constraints(state.se.And(symvar_pbuf_len >= 20 + l4_min_len, symvar_pbuf_len <= 256))
 state.memory.store(pbuf_len, state.se.Reverse(symvar_pbuf_len))
 state.add_constraints(symvar_pbuf_tot_len == symvar_pbuf_len)
 
 ### add constraints for a packet
 L2_PAYLOAD_MAX_LEN = 1500 # 1518 (max Ether frame size) - 14 (address) - 4 (FCS)
 symvar_pbuf_payload = state.se.BVS('pbuf_payload', L2_PAYLOAD_MAX_LEN * 8)
-# n = symvar_pbuf_payload.size()
-# bits = [state.se.Extract(i, i, symvar_pbuf_payload) for i in range(n)]
 tcp_header_offset = 5 * 4 * 8
 state.add_constraints(state.se.Extract(7, 0, symvar_pbuf_payload) == 0x45) # ip version & ip header size (IPHL)
 state.add_constraints(state.se.Reverse(state.se.Extract(31, 16, symvar_pbuf_payload)) == symvar_pbuf_len) # Total Length in IP header
 state.add_constraints(state.se.Extract(32 * 2 + 7, 32 * 2 + 0, symvar_pbuf_payload) > 0) # TTL
-state.add_constraints(state.se.Extract(32 * 2 + 15, 32 * 2 + 8, symvar_pbuf_payload) == 6) # ip proto (TCP = 6)
+symvar_ip_proto = state.se.Extract(32 * 2 + 15, 32 * 2 + 8, symvar_pbuf_payload)
+if tcp:
+    state.add_constraints(symvar_ip_proto == 6) # ip proto (TCP = 6, UDP = 0x11)
+elif udp:
+    state.add_constraints(symvar_ip_proto == 0x11) # ip proto (TCP = 6, UDP = 0x11)
+else:
+    state.add_constraints(state.se.Or(symvar_ip_proto == 6, symvar_ip_proto == 0x11)) # ip proto (TCP = 6, UDP = 0x11)
 state.add_constraints(state.se.Reverse(state.se.Extract(32 * 3 + 31, 32 * 3 + 0, symvar_pbuf_payload)) == 0xc0a80001) # ip src (192.168.0.1)
 state.add_constraints(state.se.Reverse(state.se.Extract(32 * 4 + 31, 32 * 4 + 0, symvar_pbuf_payload)) == 0xc0a80002) # ip dest (192.168.0.2)
-state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0xf, tcp_header_offset + 0x0, symvar_pbuf_payload)) == 20) # src port
-state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x1f, tcp_header_offset + 0x10, symvar_pbuf_payload)) == 80) # dst port
-state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) == 0x11223344) # seqno
-state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) == 0x55667788) # ackno
-symvar_tcp_dataofs = state.solver.Extract(tcp_header_offset + 96 + 7, tcp_header_offset + 96 + 4, symvar_pbuf_payload)
-state.add_constraints(state.se.And(symvar_tcp_dataofs >= 5, symvar_tcp_dataofs <= 15)) # tcp length
+if tcp:
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0xf, tcp_header_offset + 0x0, symvar_pbuf_payload)) > 0) # src port
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x1f, tcp_header_offset + 0x10, symvar_pbuf_payload)) == 80) # dst port
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) == 0x11223344) # seqno
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) == 0x55667788) # ackno
+else:
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) > 0) # seqno
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) > 0) # ackno
+if tcp:
+    symvar_tcp_dataofs = state.solver.Extract(tcp_header_offset + 96 + 7, tcp_header_offset + 96 + 4, symvar_pbuf_payload)
+    state.add_constraints(state.se.And(symvar_tcp_dataofs >= 5, symvar_tcp_dataofs <= 15)) # tcp length
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
 ### debugging
@@ -190,12 +207,7 @@ simgr = proj.factory.simgr(state)
 find, avoid = [], []
 ### (1) bug #24596; LWIP_ERROR("increment_magnitude <= p->len", (increment_magnitude <= p->len), return 1;);
 find += [rebased_addr('pbuf_header') + 0x9513 - relative_addr('pbuf_header')] # (1)
-# find += [rebased_addr('tcp_input') + 0x1d3e8 - 0x1c706] # non dropped return
-avoid += [rebased_addr('pbuf_header') + 0x9601 - relative_addr('pbuf_header')] # when pbuf_header returns 1
-avoid += [rebased_addr('tcp_input') + 0x1c85c - relative_addr('tcp_input')] # dropped
-avoid += [rebased_addr('tcp_input') + 0x1c9a4 - relative_addr('tcp_input')] # short packet
-# avoid += [rebased_addr('abort')]
-avoid += [rebased_addr('pbuf_free')]
+avoid += [rebased_addr('tcp_rst')]
 
 ### print finds / avoids
 print "[*] find = %s" % str(map(lambda x: hex(x), find))
