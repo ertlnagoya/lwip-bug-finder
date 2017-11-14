@@ -6,14 +6,19 @@ Finds bugs with symbolic execution!
 
 Requirements
 ----
+Suggested commands are based on Ubuntu 16.04.
+
 * Python2
 * angr 7
     * `sudo -H pip install angr`
+    * `sudo -H pip install -I --no-use-wheel capstone` if `ImportError: cannot import name arm` is ommitted
+* cxxfilt, hexdump
+    * `sudo -H pip install cxxfilt hexdump`
 * scapy
     * `sudo -H pip install scapy`
 * graphviz
     * To generate state history graph. Used by `emoviz.py`.
-
+    * `sudo apt install graphviz`
 
 Installation
 ----
