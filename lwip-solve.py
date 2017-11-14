@@ -1,4 +1,4 @@
-#!/bin/python2
+#!/usr/bin/python2
 # encoding: utf-8
 import angr #the main framework
 import claripy #the solver engine

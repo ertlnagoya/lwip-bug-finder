@@ -1,4 +1,4 @@
-#!/bin/python2
+#!/usr/bin/python2
 # encoding: utf-8
 import angr #the main framework
 import claripy #the solver engine
@@ -95,8 +95,8 @@ relative_addr = lambda x: proj.loader.find_symbol(x).relative_addr
 ELF_FILE = "./bin/simhost-STABLE-1_3_0"
 proj = angr.Project(ELF_FILE, load_options={'auto_load_libs': False})
 # start_addr = rebased_addr('tcp_input')
-start_addr = rebased_addr('udp_input')
-# start_addr = rebased_addr('etharp_arp_input')
+# start_addr = rebased_addr('udp_input')
+start_addr = rebased_addr('etharp_arp_input')
 print "[*] analysis start: %#x" % start_addr
 ### create blank state (initial state)
 state = proj.factory.blank_state(addr=start_addr)
@@ -282,7 +282,7 @@ find += [rebased_addr('abort')] # (2)
 avoid += [rebased_addr('tcp_rst')]
 avoid += [rebased_addr('pbuf_header') + 0x9608 - relative_addr('pbuf_header')] # bad pbuf type (This is not bug)
 ### (2) Assertion "netif->hwaddr_len == ETHARP_HWADDR_LEN" failed at line 473 in ../../../../../lwip/src/netif/etharp.c
-avoid += [rebased_addr('update_arp_entry') + 0x198fa - relative_addr('update_arp_entry')] # (2); this is not bug
+# avoid += [rebased_addr('update_arp_entry') + 0x198fa - relative_addr('update_arp_entry')] # (2); this is not bug
 # avoid += [rebased_addr('tcp_input') + 0x1c9a4 - relative_addr('tcp_input')] # short packet
 # avoid += [rebased_addr('tcp_input') + 0x1c7c9 - relative_addr('tcp_input')] # short packet .. discarded
 # avoid += [rebased_addr('udp_input') + 0x202ad - relative_addr('udp_input')] # short udp diagram
@@ -376,7 +376,7 @@ print("found #{no:d}: pbuf.payload:")
 l2_payload_len = {len:}
 v = pickle.loads({dump!r})
 if {ip!r}: # is IP packet?
-    p = IP(_pkt=v)
+    p = IP(_pkt=v[:l2_payload_len])
 elif {etharp!r}: # is Ether packet?
     p = Ether(_pkt=v[:l2_payload_len])
 # p[IP].ttl = 64
@@ -416,7 +416,7 @@ else: # preview mode
     ### print final result (this can be comment outed)
     print ""
     print "[*] preview of attack packets"
-    # os.system("python2 result.py")
+    os.system("python2 result.py")
 else:
     print "[!] no outcomes;("
 

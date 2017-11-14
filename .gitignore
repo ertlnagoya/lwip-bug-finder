@@ -1,5 +1,5 @@
 result.py
-trace/*
+trace**/
 bin/*
 *.pyc
 *.bak
