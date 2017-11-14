@@ -23,10 +23,13 @@ build(){
         git reset --hard
         git checkout $tag1
         cd $target || exit
+        [[ -e Makefile ]] || exit
         echo "CFLAGS += -Wno-error=unused-but-set-variable" >> Makefile
         echo "CFLAGS += -Wno-error=implicit-function-declaration" >> Makefile
         # echo "CFLAGS += -Wno-error=nested-exterrns" >> Makefile
-        echo "CFLAGS += -Wno-error=implicit-fallthrough" >> Makefile
+        echo "CFLAGS += -pthread" >> Makefile # (*) Works with gcc 5
+        echo "CFLAGS += -Wno-address" >> Makefile # (*) Works with gcc 5
+        # echo "CFLAGS += -Wno-error=implicit-fallthrough" >> Makefile # (*) Only works with gcc 7
         make clean
         make -j4
         cd $cur_dir

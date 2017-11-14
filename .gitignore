@@ -1,7 +1,9 @@
+build_failure.txt
 result.py
 trace**/
 bin/*
 *.pyc
 *.bak
+*.swp
 *.mpg
 .[0-9]*
