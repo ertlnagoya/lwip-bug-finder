@@ -1,0 +1,61 @@
+diff --git a/src/core/dns.c b/src/core/dns.c
+index 3ba88db0..38be6510 100644
+--- a/src/core/dns.c
++++ b/src/core/dns.c
+@@ -84,7 +84,7 @@
+ 
+ /** DNS server IP address */
+ #ifndef DNS_SERVER_ADDRESS
+-#define DNS_SERVER_ADDRESS        inet_addr("208.67.222.222") /* resolver1.opendns.com */
++#define DNS_SERVER_ADDRESS        inet_addr("8.8.8.8") /* Google DNS */
+ #endif
+ 
+ /** DNS server port address */
+diff --git a/src/include/lwip/opt.h b/src/include/lwip/opt.h
+index c980e444..94aaf9c7 100644
+--- a/src/include/lwip/opt.h
++++ b/src/include/lwip/opt.h
+@@ -1465,7 +1465,7 @@
+  * ICMP_DEBUG: Enable debugging in icmp.c.
+  */
+ #ifndef ICMP_DEBUG
+-#define ICMP_DEBUG                      LWIP_DBG_OFF
++#define ICMP_DEBUG                      LWIP_DBG_ON
+ #endif
+ 
+ /**
+@@ -1571,7 +1571,7 @@
+  * TCP_OUTPUT_DEBUG: Enable debugging in tcp_out.c output functions.
+  */
+ #ifndef TCP_OUTPUT_DEBUG
+-#define TCP_OUTPUT_DEBUG                LWIP_DBG_OFF
++#define TCP_OUTPUT_DEBUG                LWIP_DBG_ON
+ #endif
+ 
+ /**
+@@ -1592,14 +1592,14 @@
+  * UDP_DEBUG: Enable debugging in UDP.
+  */
+ #ifndef UDP_DEBUG
+-#define UDP_DEBUG                       LWIP_DBG_OFF
++#define UDP_DEBUG                       LWIP_DBG_ON
+ #endif
+ 
+ /**
+  * TCPIP_DEBUG: Enable debugging in tcpip.c.
+  */
+ #ifndef TCPIP_DEBUG
+-#define TCPIP_DEBUG                     LWIP_DBG_OFF
++#define TCPIP_DEBUG                     LWIP_DBG_ON
+ #endif
+ 
+ /**
+@@ -1648,7 +1648,7 @@
+  * DNS_DEBUG: Enable debugging for DNS.
+  */
+ #ifndef DNS_DEBUG
+-#define DNS_DEBUG                       LWIP_DBG_OFF
++#define DNS_DEBUG                       LWIP_DBG_ON
+ #endif
+ 
+ #endif /* __LWIP_OPT_H__ */

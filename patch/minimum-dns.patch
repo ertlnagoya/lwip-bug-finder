@@ -1,0 +1,65 @@
+diff --git a/ports/unix/proj/minimal/Makefile b/ports/unix/proj/minimal/Makefile
+index ba13362..48027bb 100644
+--- a/ports/unix/proj/minimal/Makefile
++++ b/ports/unix/proj/minimal/Makefile
+@@ -55,6 +55,7 @@ COREFILES=$(LWIPDIR)/core/mem.c $(LWIPDIR)/core/memp.c $(LWIPDIR)/core/netif.c \
+ 	$(LWIPDIR)/core/stats.c $(LWIPDIR)/core/sys.c \
+         $(LWIPDIR)/core/tcp.c $(LWIPDIR)/core/tcp_in.c \
+         $(LWIPDIR)/core/tcp_out.c $(LWIPDIR)/core/udp.c $(LWIPDIR)/core/dhcp.c \
++        $(LWIPDIR)/core/dns.c \
+ 	$(LWIPDIR)/core/init.c
+ CORE4FILES=$(LWIPDIR)/core/ipv4/icmp.c $(LWIPDIR)/core/ipv4/ip.c \
+ 	$(LWIPDIR)/core/ipv4/inet.c $(LWIPDIR)/core/ipv4/ip_addr.c \
+diff --git a/ports/unix/proj/minimal/lwipopts.h b/ports/unix/proj/minimal/lwipopts.h
+index 8f5f654..2bcc76c 100644
+--- a/ports/unix/proj/minimal/lwipopts.h
++++ b/ports/unix/proj/minimal/lwipopts.h
+@@ -305,7 +305,7 @@
+  * LWIP_DNS==1: Turn on DNS module. UDP must be available for DNS
+  * transport.
+  */
+-#define LWIP_DNS                        0
++#define LWIP_DNS                        1
+ 
+ /*
+    ---------------------------------
+diff --git a/ports/unix/proj/minimal/main.c b/ports/unix/proj/minimal/main.c
+index e254416..db749c2 100644
+--- a/ports/unix/proj/minimal/main.c
++++ b/ports/unix/proj/minimal/main.c
+@@ -48,6 +48,7 @@
+ #include "lwip/udp.h"
+ #include "lwip/snmp_msg.h"
+ #include "lwip/tcp.h"
++#include "lwip/dns.h"
+ #include "mintapif.h"
+ #include "netif/etharp.h"
+ 
+@@ -104,6 +105,13 @@ void usage(void)
+   }
+ }
+ 
++void dns_found(const char *name, struct ip_addr *addr, void *arg);
++void dns_found(const char *name, struct ip_addr *addr, void *arg)
++{
++  LWIP_UNUSED_ARG(arg);
++  printf("%s: %s\n", name, addr?inet_ntoa(*(struct in_addr*)addr):"<not found>");
++}
++
+ int
+ main(int argc, char **argv)
+ {
+@@ -207,6 +215,13 @@ main(int argc, char **argv)
+   
+   printf("Applications started.\n");
+     
++#if LWIP_DNS
++  char*          dnsname="www.google.com";
++  struct ip_addr dnsresp;
++  if (dns_gethostbyname(dnsname, &dnsresp, dns_found, 0) == ERR_OK) {
++    dns_found(dnsname, &dnsresp, 0);
++  }
++#endif /* LWIP_DNS */
+ 
+   while (1) {
+     
