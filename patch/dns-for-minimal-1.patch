@@ -1,0 +1,32 @@
+diff --git a/ports/unix/proj/minimal/main.c b/ports/unix/proj/minimal/main.c
+index e254416..db749c2 100644
+--- a/ports/unix/proj/minimal/main.c
++++ b/ports/unix/proj/minimal/main.c
+@@ -104,6 +105,13 @@ void usage(void)
+   }
+ }
+ 
++void dns_found(const char *name, struct ip_addr *addr, void *arg);
++void dns_found(const char *name, struct ip_addr *addr, void *arg)
++{
++  LWIP_UNUSED_ARG(arg);
++  printf("%s: %s\n", name, addr?inet_ntoa(*(struct in_addr*)addr):"<not found>");
++}
++
+ int
+ main(int argc, char **argv)
+ {
+@@ -207,6 +215,13 @@ main(int argc, char **argv)
+   
+   printf("Applications started.\n");
+     
++#if LWIP_DNS
++  char*          dnsname="www.google.com";
++  struct ip_addr dnsresp;
++  if (dns_gethostbyname(dnsname, &dnsresp, dns_found, 0) == ERR_OK) {
++    dns_found(dnsname, &dnsresp, 0);
++  }
++#endif /* LWIP_DNS */
+ 
+   while (1) {
+     
