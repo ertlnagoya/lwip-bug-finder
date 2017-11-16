@@ -7,3 +7,5 @@ bin/*
 *.swp
 *.mpg
 .[0-9]*
+.gdb_history
+peda-session*
