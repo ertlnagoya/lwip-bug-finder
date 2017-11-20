@@ -1,0 +1,117 @@
+diff --git a/ports/unix/proj/minimal/lwipopts.h b/ports/unix/proj/minimal/lwipopts.h
+index 09b7135..1aabd76 100644
+--- a/ports/unix/proj/minimal/lwipopts.h
++++ b/ports/unix/proj/minimal/lwipopts.h
+@@ -394,4 +394,6 @@
+ 
+ #define LWIP_TIMEVAL_PRIVATE 0
+ 
++#define TCP_SND_BUF 2048
++
+ #endif /* __LWIPOPTS_H__ */
+diff --git a/ports/unix/proj/unixsim/Makefile b/ports/unix/proj/unixsim/Makefile
+index 3f12fbc..7bbd86a 100644
+--- a/ports/unix/proj/unixsim/Makefile
++++ b/ports/unix/proj/unixsim/Makefile
+@@ -65,7 +65,7 @@ COREFILES=$(LWIPDIR)/core/mem.c $(LWIPDIR)/core/memp.c $(LWIPDIR)/core/netif.c \
+ 	$(LWIPDIR)/core/pbuf.c $(LWIPDIR)/core/raw.c $(LWIPDIR)/core/stats.c \
+ 	$(LWIPDIR)/core/sys.c $(LWIPDIR)/core/tcp.c $(LWIPDIR)/core/tcp_in.c \
+ 	$(LWIPDIR)/core/tcp_out.c $(LWIPDIR)/core/udp.c $(LWIPDIR)/core/dhcp.c \
+-	$(LWIPDIR)/core/init.c $(LWIPDIR)/core/timers.c $(LWIPDIR)/core/def.c
++	$(LWIPDIR)/core/init.c $(LWIPDIR)/core/timers.c $(LWIPDIR)/core/def.c $(LWIPDIR)/core/dns.c
+ CORE4FILES=$(wildcard $(LWIPDIR)/core/ipv4/*.c) $(LWIPDIR)/core/ipv4/inet.c \
+ 	$(LWIPDIR)/core/ipv4/inet_chksum.c
+ 
+@@ -138,3 +138,8 @@ simrouter: .depend $(LWIPLIB) $(APPLIB) simrouter.o
+ simnode: .depend $(LWIPLIB) $(APPLIB) simnode.o 
+ 	$(CC) $(CFLAGS) $(LDFLAGS) -o simnode simnode.o $(APPLIB) $(LWIPLIB)
+ 
++CFLAGS += -Wno-error=unused-but-set-variable
++CFLAGS += -Wno-error=old-style-definition
++CFLAGS += -Wno-error=format=
++CFLAGS += -Wno-address
++CFLAGS += -pthread
+diff --git a/ports/unix/proj/unixsim/lwipopts.h b/ports/unix/proj/unixsim/lwipopts.h
+index 1a5af19..f2fbc2e 100644
+--- a/ports/unix/proj/unixsim/lwipopts.h
++++ b/ports/unix/proj/unixsim/lwipopts.h
+@@ -68,6 +68,7 @@
+ #define TCP_FR_DEBUG     LWIP_DBG_ON
+ #define TCP_QLEN_DEBUG   LWIP_DBG_ON
+ #define TCP_RST_DEBUG    LWIP_DBG_ON
++#define DNS_DEBUG        LWIP_DBG_ON
+ 
+ extern unsigned char debug_flags;
+ #define LWIP_DBG_TYPES_ON debug_flags
+@@ -110,7 +111,7 @@ a lot of data that needs to be copied, this should be set high. */
+ #define MEMP_NUM_TCP_SEG        16
+ /* MEMP_NUM_SYS_TIMEOUT: the number of simulateously active
+    timeouts. */
+-#define MEMP_NUM_SYS_TIMEOUT    3
++#define MEMP_NUM_SYS_TIMEOUT     6
+ 
+ /* The following four are used only with the sequential API and can be
+    set to 0 if the application only will use the raw API. */
+@@ -311,4 +312,6 @@ a lot of data that needs to be copied, this should be set high. */
+ 
+ #endif /* PPP_SUPPORT > 0 */
+ 
++#define LWIP_DNS        1
++
+ #endif /* __LWIPOPTS_H__ */
+diff --git a/ports/unix/proj/unixsim/simhost.c b/ports/unix/proj/unixsim/simhost.c
+index 3c53aaf..9ad31be 100644
+--- a/ports/unix/proj/unixsim/simhost.c
++++ b/ports/unix/proj/unixsim/simhost.c
+@@ -48,6 +48,7 @@
+ #include "lwip/inet_chksum.h"
+ 
+ #include "lwip/tcpip.h"
++#include "lwip/dns.h"
+ #include "lwip/sockets.h"
+ 
+ #include "netif/tapif.h"
+@@ -376,6 +377,13 @@ init_netifs(void)
+   /*  sys_timeout(5000, tcp_debug_timeout, NULL);*/
+ }
+ 
++void dns_found(const char *name, struct ip_addr *addr, void *arg);
++void dns_found(const char *name, struct ip_addr *addr, void *arg)
++{
++  LWIP_UNUSED_ARG(arg);
++  printf("%s: %s\n", name, addr?ip_ntoa(addr):"<not found>");
++}
++
+ /*-----------------------------------------------------------------------------------*/
+ static void
+ main_thread(void *arg)
+@@ -404,6 +412,29 @@ main_thread(void *arg)
+ 
+   printf("Applications started.\n");
+ 
++#if LWIP_DNS
++  // for (int i = 0; i < 5000 * 1000; i++) { printf("."); }
++  dns_init();
++  puts("[*] dns_init done!");
++  char dnsname[] = "www.google.com";
++  struct ip_addr dnsresp;
++  err_t err = dns_gethostbyname(dnsname, &dnsresp, dns_found, 0);
++  if (err == ERR_ARG) {
++    puts("[!] dns_gethostbyname() returnded ERR_ARG. exit");
++    exit(1);
++  }
++  else if (err == ERR_OK) {
++    puts("[!] dns_gethostbyname() returnded ERR_OK");
++  }
++  else if (err == ERR_INPROGRESS) {
++    puts("[!] dns_gethostbyname() returnded ERR_INPROGRESS");
++  }
++  else {
++    printf("[!] dns_gethostbyname() returnded unhandled error (%d). exit\n", err);
++    exit(1);
++  }
++#endif /* LWIP_DNS */
++
+ 
+ #ifdef MEM_PERF
+   mem_perf_init("/tmp/memstats.client");

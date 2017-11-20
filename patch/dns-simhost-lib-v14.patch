@@ -1,0 +1,27 @@
+diff --git a/src/api/netdb.c b/src/api/netdb.c
+index a7e4e06..1762bf3 100644
+--- a/src/api/netdb.c
++++ b/src/api/netdb.c
+@@ -43,6 +43,9 @@
+ #include "lwip/ip_addr.h"
+ #include "lwip/api.h"
+ #include "lwip/dns.h"
++#include "lwip/arch.h"
++
++#define ENSRNOTFOUND            163 /* Domain name not found */
+ 
+ #include <string.h>
+ #include <stdlib.h>
+diff --git a/src/core/dns.c b/src/core/dns.c
+index d633612..af643d2 100644
+--- a/src/core/dns.c
++++ b/src/core/dns.c
+@@ -85,7 +85,7 @@
+ 
+ /** DNS server IP address */
+ #ifndef DNS_SERVER_ADDRESS
+-#define DNS_SERVER_ADDRESS(ipaddr)        (ip4_addr_set_u32(ipaddr, ipaddr_addr("208.67.222.222"))) /* resolver1.opendns.com */
++#define DNS_SERVER_ADDRESS(ipaddr)        (ip4_addr_set_u32(ipaddr, ipaddr_addr("8.8.8.8"))) /* resolver1.opendns.com */
+ #endif
+ 
+ /** DNS server port address */
