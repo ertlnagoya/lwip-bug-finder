@@ -17,19 +17,24 @@ build(){
     target=$3
     if [[ ! -e "${bin_dir}/${bin}-${tag2}" ]]; then
         cur_dir=`pwd`
+        ### for lwip
         cd ./lwip || exit
+        git reset --hard
         git checkout $tag2
-        cd ../lwip-contrib
+        ### for lwip-contrib
+        cd ../lwip-contrib || exit
         git reset --hard
         git checkout $tag1
+        ### for build target
         cd $target || exit
         [[ -e Makefile ]] || exit
         echo "CFLAGS += -Wno-error=unused-but-set-variable" >> Makefile
+        echo "CFLAGS += -Wno-error=nested-externs" >> Makefile
         echo "CFLAGS += -Wno-error=implicit-function-declaration" >> Makefile
-        # echo "CFLAGS += -Wno-error=nested-exterrns" >> Makefile
         echo "CFLAGS += -pthread" >> Makefile # (*) Works with gcc 5
         echo "CFLAGS += -Wno-address" >> Makefile # (*) Works with gcc 5
         # echo "CFLAGS += -Wno-error=implicit-fallthrough" >> Makefile # (*) Only works with gcc 7
+        ### build it!
         make clean
         make -j4
         cd $cur_dir
