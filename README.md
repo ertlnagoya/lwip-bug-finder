@@ -1,7 +1,7 @@
 lwip bug finder
 ====
 
-Finds bugs with symbolic execution!
+Find bugs with symbolic execution!
 
 
 Requirements
@@ -41,6 +41,11 @@ Usage
 Running `lwip-solve.py` will generates attack packet and saves result to `result.py`.
 
 Run `sudo ./simhost-STABLE-XXX -d` and run `sudo python result.py 0` to attack simhost. Version of lwip must be 1.x.
+
+### to find DNS bugs
+(runtime: ??? sec)
+
+Run `./lwip-solve-echop.py dns_recv`. Results are saved to output dir.
 
 
 Tips

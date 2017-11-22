@@ -14,6 +14,7 @@ import hexdump
 
 angr.manager.l.setLevel("DEBUG")
 
+### ==================================================================
 TRACE_SAVE_DIR = "./trace/"
 os.system("if [ ! -d %s ]; then mkdir %s; fi" % (TRACE_SAVE_DIR, TRACE_SAVE_DIR))
 os.system("rm -f %s[a-zA-Z]*-[0-9]*.{png,dot,txt}" % (TRACE_SAVE_DIR))
@@ -59,6 +60,7 @@ def signal_handler(signal, frame):
     plot_trace()
     exit(1)
 signal.signal(signal.SIGINT, signal_handler) # Ctrl+C
+### ==================================================================
 
 def dump_regs(state, _exit=True):
     global symvar_listen_pcbs, symbar_netif
@@ -107,12 +109,14 @@ relative_addr = lambda x: proj.loader.find_symbol(x).relative_addr
 if len(sys.argv) == 1:
     usage()
 START_FUNC = sys.argv[1]
-if START_FUNC not in ['tcp_input', 'udp_input', 'etharp_arp_input']:
+if START_FUNC not in ['tcp_input', 'udp_input', 'etharp_arp_input', 'dns_recv']:
     print "[!] invalid function name"
     exit(1)
 
 ### load binary
 ELF_FILE = "./bin/simhost-STABLE-1_3_0"
+if START_FUNC == 'dns_recv':
+    ELF_FILE = "./bin/echop-STABLE-1_3_0"
 proj = angr.Project(ELF_FILE, load_options={'auto_load_libs': False})
 start_addr = rebased_addr(START_FUNC)
 print "[*] analysis start: %#x" % start_addr
@@ -144,16 +148,18 @@ def handle_ret_0(state):
 ### hooks function calls
 try:
     ### nop function x() calls
-    funcs = [
-    "tcp_debug_print_flags", "tcp_debug_print",
-    "udp_debug_print", # debug output
-    "inet_chksum_pseudo", # checksum check
-    "inet_chksum_pseudo_partial",
-    # "tcp_process", # tcp state machine
-    # "pbuf_free",
-    "sys_arch_protect", "sys_arch_unprotect", # SYS_ARCH_PROTECT, SYS_ARCH_UNPROTECT
-    "sys_arch_sem_wait",
-    ]
+    funcs = []
+    if True:
+        funcs += [
+        "tcp_debug_print_flags", "tcp_debug_print",
+        "udp_debug_print", # debug output
+        "inet_chksum_pseudo", # checksum check
+        "inet_chksum_pseudo_partial",
+        "tcp_process", # tcp state machine
+        # "pbuf_free",
+        "sys_arch_protect", "sys_arch_unprotect", # SYS_ARCH_PROTECT, SYS_ARCH_UNPROTECT
+        "sys_arch_sem_wait",
+        ]
     for func_name in funcs:
         if func_name in info.call:
             for x in info.call[func_name]:
@@ -329,7 +335,7 @@ if False:
     hexdump.hexdump(v)
     exit()
 
-### symbolize tcp pcbs
+### symbolize tcp/udp pcbs
 """
 gdb-peda$ p tcp_listen_pcbs
 $6 = {
@@ -587,17 +593,17 @@ simgr = proj.factory.simgr(state)
 find, avoid = [], []
 ### (1) bug #24596; LWIP_ERROR("increment_magnitude <= p->len", (increment_magnitude <= p->len), return 1;);
 if tcp:
-    # find += [rebased_addr('pbuf_header') + 0x9513 - relative_addr('pbuf_header')] # (1)
+    find += [rebased_addr('pbuf_header') + 0x9513 - relative_addr('pbuf_header')] # (1)
     # find += [rebased_addr('tcp_process')]
-    avoid += [rebased_addr('pbuf_header') + 0x9513 - relative_addr('pbuf_header')] # (1)
+    # avoid += [rebased_addr('pbuf_header') + 0x9513 - relative_addr('pbuf_header')] # (1)
 elif udp:
     # find += [rebased_addr('pbuf_header') + 0x9513 - relative_addr('pbuf_header')] # (1)
     # avoid += [rebased_addr('pbuf_header') + 0x9513 - relative_addr('pbuf_header')] # (1)
     pass
 ### (2) find other bugs
-find += [rebased_addr('abort')] # (2)
-find += [rebased_addr('exit')] # (2)
-find += [rebased_addr('__stack_chk_fail')] # (2)
+# find += [rebased_addr('abort')] # (2)
+# find += [rebased_addr('exit')] # (2)
+# find += [rebased_addr('__stack_chk_fail')] # (2)
 # find += [rebased_addr('udp_input') + 0x20824 - relative_addr('udp_input')] # p->recv()
 # # avoid += [rebased_addr('pbuf_free')]
 # avoid += [rebased_addr('tcp_rst')]

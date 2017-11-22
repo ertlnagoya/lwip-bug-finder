@@ -1,6 +1,7 @@
 build_failure.txt
 result.py
 trace**/
+output-*/
 bin/*
 *.pyc
 *.bak
