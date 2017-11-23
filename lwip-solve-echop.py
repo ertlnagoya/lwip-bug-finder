@@ -319,24 +319,28 @@ gdb-peda$ x/12wx p->payload
 0x61f7c2 <memp_memory+8962>:    0x77777703  0x6f6f6706  0x03656c67  0x006d6f63
 0x61f7d2 <memp_memory+8978>:    0x01000100  0x00000000  0x007f0400  0x000c0100
 """
-state.add_constraints(LittleEndian(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pbuf_payload)) == 0x80810000)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) > 0x01000100) # Answer RRs
-state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pbuf_payload)) == 0x80810000)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0x01000100) # Answer RRs = 0x01
+# ## state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
+
 state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
+
 state.add_constraints(LittleEndian(state.se.Extract(8 * 36 - 1, 8 * 32, symvar_pbuf_payload)) == 0x77777703)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 40 - 1, 8 * 36, symvar_pbuf_payload)) == 0x6f6f6706)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_pbuf_payload)) == 0x03656c67)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) >= 0x007f0400)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
+
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
+# ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
+
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
 print "[*] pbuf->payload"
@@ -656,9 +660,13 @@ THREADING = False
 DEPTH_FIRST = True
 # DEPTH_FIRST = False
 if THREADING:
-    simgr.use_technique(angr.exploration_techniques.Threading(4)) # cause segmentation fault
+    print "[*] Threading enabled"
+    simgr.use_technique(angr.exploration_techniques.Threading(4)) # this causes segmentation fault
 elif DEPTH_FIRST:
+    print "[*] DFS enabled"
     simgr.use_technique(angr.exploration_techniques.DFS())
+else:
+    print "[*] Default exploration mode"
 
 ### setup avoids
 find, avoid = [], []
@@ -677,32 +685,33 @@ print "[*] avoid = %s" % str(map(lambda x: hex(x), avoid))
 import random
 random = random.Random()
 random.seed(10)
+prev_deferred_len = -1
 def step_func(lpg):
-    global find, avoid, THREADING, DEPTH_FIRST, random
+    global find, avoid, THREADING, DEPTH_FIRST, random, prev_deferred_len
     if THREADING:
         if find is not []:
-            lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
             lpg.stash(filter_func=lambda path: path.addr not in find, from_stash='threadlocal', to_stash='active')
         else:
             lpg.stash(filter_func=lambda path: True, from_stash='threadlocal', to_stash='active')
         if avoid is not []:
-            lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
             lpg.stash(filter_func=lambda path: path.addr not in avoid, from_stash='threadlocal', to_stash='active')
-        pass
-    else:
-        if find is not []:
-            lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
-        if avoid is not []:
-            lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
-        lpg.drop(stash='avoid') # memory usage optimization
-    # print "[*] len(lpg.active) = %d" % (len(lpg.active))
+
+    if find is not []:
+        lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
+    lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
+
+    # if DEPTH_FIRST and not len(lpg.deferred) == prev_deferred_len:
+    #     lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='deferred', to_stash='avoid')
+    #     prev_deferred_len = len(lpg.deferred)
+    lpg.drop(stash='avoid') # memory usage optimization
+
+    print "[*] len(lpg.active) = %d, len(lpg.deferred) = %d" % (len(lpg.active), len(lpg.deferred))
     if DEPTH_FIRST:
         if len(lpg.active) == 0 and len(lpg.deferred) > 0:
-            random.shuffle(lpg.deferred)
-            lpg.split(from_stash='deferred', to_stash='active', limit=1)
-    if THREADING:
-        if len(lpg.active) == 0 and len(lpg.threadlocal) > 0:
-            lpg.split(from_stash='threadlocal', to_stash='active', limit=1)
+            lpg.active.append(lpg.deferred.pop())
+    # if THREADING:
+    #     if len(lpg.active) == 0 and len(lpg.threadlocal) > 0:
+    #         lpg.split(from_stash='threadlocal', to_stash='active', limit=1)
     return lpg
 
 def until_func(lpg):
@@ -716,8 +725,11 @@ def until_func(lpg):
             return len(lpg.deferred) == 0
 
 ### explore bugs
+time.sleep(5)
+assert(avoid is not [])
 simgr.step(step_func=step_func, until=until_func) # explore until error occurs (or active stashes exhausts)
 print "[*] explore finished!!"
+# exit(1) # to utilize vmprof
 
 print "[*] mode:"
 print "\tTHREADING = %r" % (THREADING)
@@ -741,10 +753,11 @@ print "[*] saving result to %s" % (RESULT_TXT)
 ftxt = open(RESULT_TXT, 'w')
 fout = sys.stdout
 sys.stdout = ftxt # redirect to a file
-if len(simgr.found) > 0 or len(simgr.errored) > 0:
+FOUND_RESULT = len(simgr.found) > 0 or len(simgr.errored) > 0
+if FOUND_RESULT:
     plot_trace()
     ### save results
-    result = open("result.py", "w")
+    result = open(RESULT_PY, "w")
     result.write("""#!/usr/bin/python2
 import sys
 import pickle
@@ -864,11 +877,16 @@ else: # preview mode
     for i, errored in enumerate(simgr.errored):
         se = errored.state.plugins['solver_engine']
         posix = errored.state.plugins['posix']
+        memory = errored.state.plugins['memory']
+        print "errored #%d: error.reason: %s" % (i, errored.error.reason)
+        print "errored #%d: error.addr: %#x" % (i, errored.error.addr)
+        print "errored #%d: error.ins_addr: %#x" % (i, errored.error.ins_addr)
         print "errored #%d: stdout:\n%s" % (i, posix.dumps(1))
         print "errored #%d: stderr:\n%r" % (i, posix.dumps(2))
         payload_len = se.eval(symvar_pbuf_tot_len)
         print "errored #{0:d}: pbuf->tot_len: {1:#x} ({1:d})".format(i, payload_len)
-        v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
+        # v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
+        v = se.eval(memory.load(pbuf_payload, 0x100), cast_to=str)[:payload_len]
         print "errored #%d: pbuf->payload:" % (i)
         hexdump.hexdump(v)
         result.write("""\n
@@ -914,22 +932,26 @@ ftxt.close()
 os.system("if [ -e {py} ]; then (echo; echo '[*] preview of attack packets'; python2 {py}) >> {txt}; fi".format(py=RESULT_PY, txt=RESULT_TXT))
 os.system("cat %s" % (RESULT_TXT)) # print solver script message
 
-### end measurement
-run_time = time.time() - start_time
-cpu_time = time.clock() # < python 3.3
+if FOUND_RESULT:
+    ### end measurement
+    run_time = time.time() - start_time
+    cpu_time = time.clock() # < python 3.3
 
-### save files to output directory
-OUTPUT_DIR = "./output-last/"
-os.system("if [ ! -d {dir} ]; then mkdir {dir}; else rm -rf {dir}/*; fi".format(dir=OUTPUT_DIR))
-os.system("cp {_from!s} {_to!s}".format(_from=sys.argv[0], _to=OUTPUT_DIR)) # this solver script
-for x in [RESULT_TXT, RESULT_PY, ANGR_LOG, TRACE_SAVE_DIR]:
-    os.system("mv {_from!s} {_to!s}".format(_from=x, _to=OUTPUT_DIR))
-print "[*] output files are saved to {!s}".format(OUTPUT_DIR)
+    ### save files to output directory
+    OUTPUT_DIR = "./output-last/"
+    os.system("if [ ! -d {dir} ]; then mkdir {dir}; else rm -rf {dir}/*; fi".format(dir=OUTPUT_DIR))
+    os.system("cp {_from!s} {_to!s}".format(_from=sys.argv[0], _to=OUTPUT_DIR)) # this solver script
+    for x in [RESULT_TXT, RESULT_PY, ANGR_LOG, TRACE_SAVE_DIR]:
+        os.system("mv {_from!s} {_to!s}".format(_from=x, _to=OUTPUT_DIR))
+    print "[*] output files are saved to {!s}".format(OUTPUT_DIR)
 
-### write README
-README = OUTPUT_DIR + "README.txt"
-with open(README, "w") as f:
-    f.write("""README: About this output directory\n
+    ### write README
+    README = OUTPUT_DIR + "README.txt"
+    with open(README, "w") as f:
+        f.write("""README: About this output directory\n
+Host:
+    {host}
+
 Executed at:
     {date}
 
@@ -950,8 +972,10 @@ angr debug log:
 
 Trace (state history):
     ./trace
-""".format(date=datetime.datetime.today().strftime("%Y/%m/%d %H:%M:%S"),
-    cmd=' '.join(sys.argv), run_time=dhms(run_time), cpu_time=dhms(cpu_time),
-    txt=RESULT_TXT, py=RESULT_PY, log=ANGR_LOG))
+""".format(host=os.uname()[1], date=datetime.datetime.today().strftime("%Y/%m/%d %H:%M:%S"),
+        cmd=' '.join(sys.argv), run_time=dhms(run_time), cpu_time=dhms(cpu_time),
+        txt=RESULT_TXT, py=RESULT_PY, log=ANGR_LOG))
+
+import ipdb; ipdb.set_trace()
 
 ### you can send generated packets with result.py. enjoy:)

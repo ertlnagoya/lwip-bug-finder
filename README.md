@@ -22,6 +22,13 @@ Suggested commands are based on Ubuntu 16.04.
 
 Installation
 ----
+### apt install
+Install fallawing package needed.
+
+```bash
+sudo apt install python python-pip pypy pypy-dev libffi-dev libncurses5-dev
+```
+
 ### git clone
 ```bash
 git clone  --recursive https://github.com/ertlnagoya/lwip-bug-finder.git
