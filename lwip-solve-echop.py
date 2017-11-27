@@ -13,8 +13,7 @@ import pickle
 import hexdump
 import time, datetime
 
-### to measure run time
-start_time = time.time()
+start_time = time.time() # start measure
 
 ANGR_LOG = "angr.log"
 angr.manager.l.setLevel("DEBUG")
@@ -132,7 +131,12 @@ def dhms(t):
     m = t / 60
     t -= m * 60
     s = t % 60
-    return "{}:{}:{}:{} ({:.3f}s)".format(d, h, m, s, orig)
+    return "{:02d}:{:02d}:{:02d}:{:02d} ({:.3f}s)".format(d, h, m, s, orig)
+
+def proc_cmdline():
+    with open("/proc/self/cmdline") as f:
+        ret = f.read().strip('\0').split('\0')
+    return ret
 
 def usage():
     print "usage: %s START_FUNC_NAME" % (sys.argv[0])
@@ -319,27 +323,31 @@ gdb-peda$ x/12wx p->payload
 0x61f7c2 <memp_memory+8962>:    0x77777703  0x6f6f6706  0x03656c67  0x006d6f63
 0x61f7d2 <memp_memory+8978>:    0x01000100  0x00000000  0x007f0400  0x000c0100
 """
+### block 0
 # state.add_constraints(LittleEndian(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pbuf_payload)) == 0x80810000)
 # state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0x01000100) # Answer RRs = 0x01
 # ## state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
 # state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
 # state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
 
-state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
+### block 1
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
 
+### block 2
 state.add_constraints(LittleEndian(state.se.Extract(8 * 36 - 1, 8 * 32, symvar_pbuf_payload)) == 0x77777703)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 40 - 1, 8 * 36, symvar_pbuf_payload)) == 0x6f6f6706)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_pbuf_payload)) == 0x03656c67)
 state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
 
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
-# ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
+### block 3
+state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
+## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
 
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
@@ -608,14 +616,14 @@ if dns:
     ### debuging
     v = state.se.eval(state.se.Reverse(symvar_dns_table), cast_to=str)
     hexdump.hexdump(v[:sizeof_dns_table_entry])
-    for i in range(dns_table, dns_table + sizeof_dns_table_entry, 8):
-        try:
-            v = state.mem[i].uint64_t.concrete
-        except Exception, e:
-            print "mem[%#x]: " % i + str(e)
-            continue
-        if v > 0:
-            print "mem[%#x] = %#x" % (i, v)
+    # for i in range(dns_table, dns_table + sizeof_dns_table_entry, 8):
+    #     try:
+    #         v = state.mem[i].uint64_t.concrete
+    #     except Exception, e:
+    #         print "mem[%#x]: " % i + str(e)
+    #         continue
+    #     if v > 0:
+    #         print "mem[%#x] = %#x" % (i, v)
     # import ipdb; ipdb.set_trace()
     # exit()
 
@@ -660,10 +668,10 @@ THREADING = False
 DEPTH_FIRST = True
 # DEPTH_FIRST = False
 if THREADING:
-    print "[*] Threading enabled"
-    simgr.use_technique(angr.exploration_techniques.Threading(4)) # this causes segmentation fault
+    print "[*] simgr.use_technique: Threading enabled"
+    simgr.use_technique(angr.exploration_techniques.Threading(6)) # NOTE: pypy & python2 causes segmentation fault
 elif DEPTH_FIRST:
-    print "[*] DFS enabled"
+    print "[*] simgr.use_technique: DFS enabled"
     simgr.use_technique(angr.exploration_techniques.DFS())
 else:
     print "[*] Default exploration mode"
@@ -690,28 +698,27 @@ def step_func(lpg):
     global find, avoid, THREADING, DEPTH_FIRST, random, prev_deferred_len
     if THREADING:
         if find is not []:
-            lpg.stash(filter_func=lambda path: path.addr not in find, from_stash='threadlocal', to_stash='active')
-        else:
-            lpg.stash(filter_func=lambda path: True, from_stash='threadlocal', to_stash='active')
-        if avoid is not []:
-            lpg.stash(filter_func=lambda path: path.addr not in avoid, from_stash='threadlocal', to_stash='active')
+            lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
+        lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
+        # if find is not []:
+        #     lpg.stash(filter_func=lambda path: path.addr not in find, from_stash='threadlocal', to_stash='found')
+        # if avoid is not []:
+        #     lpg.stash(filter_func=lambda path: path.addr not in avoid, from_stash='threadlocal', to_stash='avoid')
+    else:
+        if find is not []:
+            lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
+        lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
 
-    if find is not []:
-        lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
-    lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
-
-    # if DEPTH_FIRST and not len(lpg.deferred) == prev_deferred_len:
-    #     lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='deferred', to_stash='avoid')
-    #     prev_deferred_len = len(lpg.deferred)
     lpg.drop(stash='avoid') # memory usage optimization
 
-    print "[*] len(lpg.active) = %d, len(lpg.deferred) = %d" % (len(lpg.active), len(lpg.deferred))
+    # if THREADING:
+    #     print "[*] len(lpg.active) = %d, len(lpg.threadlocal) = %d" % (len(lpg.active), len(lpg.threadlocal))
+    #     if len(lpg.active) == 0 and len(lpg.threadlocal) > 0:
+    #         lpg.active.append(lpg.threadlocal.pop())
     if DEPTH_FIRST:
+        print "[*] len(lpg.active) = %d, len(lpg.deferred) = %d" % (len(lpg.active), len(lpg.deferred))
         if len(lpg.active) == 0 and len(lpg.deferred) > 0:
             lpg.active.append(lpg.deferred.pop())
-    # if THREADING:
-    #     if len(lpg.active) == 0 and len(lpg.threadlocal) > 0:
-    #         lpg.split(from_stash='threadlocal', to_stash='active', limit=1)
     return lpg
 
 def until_func(lpg):
@@ -952,7 +959,7 @@ if FOUND_RESULT:
 Host:
     {host}
 
-Executed at:
+Executed date:
     {date}
 
 Run command:
@@ -967,13 +974,13 @@ Run result:
 Attacker script:
     ./{py}
 
-angr debug log:
+angr's debug log:
     ./{log}
 
 Trace (state history):
     ./trace
 """.format(host=os.uname()[1], date=datetime.datetime.today().strftime("%Y/%m/%d %H:%M:%S"),
-        cmd=' '.join(sys.argv), run_time=dhms(run_time), cpu_time=dhms(cpu_time),
+        cmd=' '.join(proc_cmdline()), run_time=dhms(run_time), cpu_time=dhms(cpu_time),
         txt=RESULT_TXT, py=RESULT_PY, log=ANGR_LOG))
 
 import ipdb; ipdb.set_trace()
