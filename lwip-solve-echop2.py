@@ -166,6 +166,18 @@ print "[*] analysis start: %#x" % start_addr
 ### create blank state (initial state)
 state = proj.factory.blank_state(addr=start_addr)
 
+## some inspecting
+# import ipdb; ipdb.set_trace()
+
+### add inspecter
+def debug_funcRead(state):
+    # print '>> Read', state.inspect.mem_read_expr, 'from', state.inspect.mem_read_address
+    addr_repr = repr(state.inspect.mem_read_address)
+    if "pcb" in addr_repr:
+        print '>> Read', state.inspect.mem_read_address, 'at', hex(state.addr)
+        exit(1)
+state.inspect.b("mem_read", when=angr.BP_AFTER, action=debug_funcRead)
+
 ### map new region for my symbolic variables
 """memo
 gdb-peda$ vmmap
@@ -178,9 +190,9 @@ Start              End                Perm  Name
 """
 MY_SYMVAR_REGION_BEGIN = 0x20000000
 MY_SYMVAR_REGION_LENGTH = 0x1000000
-state.memory.mem.map_region(MY_SYMVAR_REGION_BEGIN, MY_SYMVAR_REGION_LENGTH, 0b111) # begin, len, permissions
-MAPPED_BEGIN = 0x00619000
-MAPPED_LENGTH = 0x3000
+state.memory.mem.map_region(MY_SYMVAR_REGION_BEGIN, MY_SYMVAR_REGION_LENGTH, 0b011) # begin, len, permissions(rw-p)
+# MAPPED_BEGIN = 0x00619000
+# MAPPED_LENGTH = 0x3000
 # state.memory.mem.map_region(MAPPED_BEGIN, MAPPED_LENGTH, 0b111) # begin, len, permissions # Already mapped?
 
 ### change options
@@ -369,8 +381,8 @@ hexdump.hexdump(v[:0x40])
 
 ### load initalized object values
 print "[*] loading initalized objects to engine:"
-# for objname, objval in dump.items():
-for (objname, objval) in {'dns_table': dump['dns_table']}.items():
+for objname, objval in dump.items():
+# for (objname, objval) in {'dns_table': dump['dns_table']}.items():
     begin = rebased_addr(objname)
     print "\tloading %s ... (addr = %#x)" % (objname, begin)
     for i, v in enumerate(objval):
@@ -379,221 +391,29 @@ v = state.se.eval(state.memory.load(rebased_addr("dns_table"), 0x120), cast_to=s
 hexdump.hexdump(v)
 # exit()
 
-# if dns:
-#     print "[*] symbolizing dns_table"
-#     dns_table = rebased_addr('dns_table')
-#     sizeof_dns_table = sizeof('dns_table')
-#     sizeof_dns_table_entry = 0x11e
-#     symvar_dns_table = state.se.BVS('dns_table', 8 * sizeof_dns_table)
-#     print "[*] sizeof(dns_table) = %#x" % (sizeof_dns_table)
-#     ### set content of dns_table[0]
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_dns_table)) == 0x00010002)
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_dns_table)) == 0)
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_dns_table)) == 0x77770000)
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_dns_table)) == 0x6f672e77)
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_dns_table)) == 0x656c676f)
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_dns_table)) == 0x6d6f632e)
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 270 - 1, 8 * 24, symvar_dns_table)) == 0)
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 273 - 1, 8 * 270, symvar_dns_table)) == rebased_addr('dns_found')) # found
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 276 - 1, 8 * 273, symvar_dns_table)) == 0) # found
-#     state.add_constraints(NoReverse(state.se.Extract(8 * sizeof_dns_table_entry - 1, 8 * 276, symvar_dns_table)) == 0)
-#     ### spill out dns_table[1] ... dns_table[DNS_TABLE_SIZE]
-#     state.add_constraints(state.se.Extract(symvar_dns_table.size() - 1, 8 * sizeof_dns_table_entry, symvar_dns_table) == 0)
-#     ### store symvar
-#     state.memory.store(dns_table, state.se.Reverse(symvar_dns_table))
-
-#     ### debuging
-#     v = state.se.eval(state.se.Reverse(symvar_dns_table), cast_to=str)
-#     hexdump.hexdump(v[:sizeof_dns_table_entry])
-
+### ===== Do not delete me ===========================================
+### Or you correct modles cannot be obtained
 ### symbolize tcp/udp pcbs
 print "[*] symbolizing tcp/udp pcbs"
-"""
-gdb-peda$ p tcp_listen_pcbs
-$6 = {
-  listen_pcbs = 0x560bea7c7b28 <memp_memory+1736>,
-  pcbs = 0x560bea7c7b28 <memp_memory+1736>
-}
-gdb-peda$ p *(tcp_listen_pcbs->listen_pcbs)
-$8 = {
-  local_ip = {
-    addr = 0x0
-  },
-  remote_ip = {
-    addr = 0x560b
-  },
-  so_options = 0x2,
-  tos = 0x0,
-  ttl = 0xff,
-  next = 0x560bea7c7b60 <memp_memory+1792>,
-  state = LISTEN,
-  prio = 0x0,
-  callback_arg = 0x560bea7c8250 <memp_memory+3568>,
-  local_port = 0x7,
-  accept = 0x560bea5a9039 <accept_function>
-}
-gdb-peda$ x/20wx (tcp_listen_pcbs->listen_pcbs)
-0x560bea7c7b28 <memp_memory+1736>:  0x00000000  0x0000560b  0xff000002  0x00000000
-0x560bea7c7b38 <memp_memory+1752>:  0xea7c7b60  0x0000560b  0x00000001  0x00000000 // + 16
-0x560bea7c7b48 <memp_memory+1768>:  0xea7c8250  0x0000560b  0x00000007  0x00000000 // + 32
-0x560bea7c7b58 <memp_memory+1784>:  0xea5a9039  0x0000560b  0x00000000  0x0000560b // + 48
-0x560bea7c7b68 <memp_memory+1800>:  0xff000002  0x00000000  0xea7c7b98  0x0000560b
-
-gdb-peda$ x/20wx (tcp_listen_pcbs->listen_pcbs)->callback_arg
-0x560bea7c8250 <memp_memory+3568>:  0x00000010  0x00000002  0xea7c7b28  0x0000560b
-0x560bea7c8260 <memp_memory+3584>:  0x00000000  0x00000000  0xec000b10  0x00007fd4
-0x560bea7c8270 <memp_memory+3600>:  0x00000000  0x00000000  0xe8000f40  0x00007fd4
-0x560bea7c8280 <memp_memory+3616>:  0xffffffff  0x00000000  0x00000000  0x00000000
-0x560bea7c8290 <memp_memory+3632>:  0x00000000  0x00000000  0x00000000  0x00000000
-"""
 listen_pcbs = MY_SYMVAR_REGION_BEGIN + 0x10000
 callback_arg = listen_pcbs + sizeof("tcp_listen_pcbs")
-# state.mem[rebased_addr('tcp_listen_pcbs')].uint64_t = state.se.Reverse(state.se.BVV(listen_pcbs, 64))
 state.mem[rebased_addr('tcp_listen_pcbs')].uint64_t = listen_pcbs
 state.mem[callback_arg + 0].uint32_t = 0x00000010
 state.mem[callback_arg + 4].uint32_t = 0x00000002
 symvar_listen_pcbs = state.se.BVS('listen_pcbs', 56 * 8)
 symvar_listen_pcbs_state = state.se.BVS('listen_pcbs', 4 * 8)
-"""
-include/lwip/tcpbase.h
-enum tcp_state {
-  CLOSED      = 0,
-  LISTEN      = 1,
-  SYN_SENT    = 2,
-  SYN_RCVD    = 3,
-  ESTABLISHED = 4,
-  FIN_WAIT_1  = 5,
-  FIN_WAIT_2  = 6,
-  CLOSE_WAIT  = 7,
-  CLOSING     = 8,
-  LAST_ACK    = 9,
-  TIME_WAIT   = 10
-};
-"""
-"""
-  for(pcb = tcp_active_pcbs; pcb != NULL; pcb = pcb->next) {
-    LWIP_ASSERT("tcp_input: active pcb->state != CLOSED", pcb->state != CLOSED);
-    LWIP_ASSERT("tcp_input: active pcb->state != TIME-WAIT", pcb->state != TIME_WAIT);
-    LWIP_ASSERT("tcp_input: active pcb->state != LISTEN", pcb->state != LISTEN);
-"""
-state.add_constraints(state.se.And(symvar_listen_pcbs_state > 1, symvar_listen_pcbs_state < 10)) # to pass assertions
-state.add_constraints(NoReverse(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_listen_pcbs)) == 0x0) # local ip
-state.add_constraints(NoReverse(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_listen_pcbs)) == 0x560b) # remote ip
-state.add_constraints(NoReverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_listen_pcbs)) == 0xff000002) # so_options, tos, ttl
-state.add_constraints(NoReverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_listen_pcbs)) == 0x0) # padding?
-state.add_constraints(NoReverse(state.se.Extract(8 * 24 - 1, 8 * 16, symvar_listen_pcbs)) == 0) # next
-state.add_constraints(NoReverse(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_listen_pcbs)) == symvar_listen_pcbs_state) # state
-# state.add_constraints(NoReverse(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_listen_pcbs)) == 0) # prio?
-state.add_constraints(NoReverse(state.se.Extract(8 * 40 - 1, 8 * 32, symvar_listen_pcbs)) == callback_arg) # callback_arg
-# state.add_constraints(NoReverse(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_listen_pcbs)) == 7) # local_port
-# state.add_constraints(NoReverse(state.se.Extract(8 * 56 - 1, 8 * 48, symvar_listen_pcbs)) == rebased_addr('accept_function')) # accept
 state.memory.store(listen_pcbs, state.se.Reverse(symvar_listen_pcbs))
-
 
 ### symbolize tcp_active_pcbs
 print "[*] symbolizing tcp_active_pcbs"
-"""
-gdb-peda$ p (struct tcp_pcb) pcb
-$11 = {
-  local_ip = {
-    addr = 0xea7cbfa8
-  },
-  remote_ip = {
-    addr = 0x560b
-  },
-  so_options = 0x0,
-  tos = 0x0,
-  ttl = 0x0,
-  next = 0x7fd50530fdf0,
-  state = 3931789480,
-  prio = 0xb,
-  callback_arg = 0x0,
-  local_port = 0xfe50,
-  remote_port = 0x530,
-  flags = 0xd5,
-  rcv_nxt = 0xea5a629c,
-  rcv_wnd = 0x560b,
-  rcv_ann_wnd = 0x0,
-  tmr = 0xea7cce00,
-  polltmr = 0xb,
-  pollinterval = 0x56,
-  rtime = 0x0,
-  mss = 0xbfa8,
-  rttest = 0x560b,
-  rtseq = 0x530fe70,
-  sa = 0x7fd5,
-  sv = 0x0,
-  rto = 0x14,
-  nrtx = 0x30,
-  lastack = 0x1,
-  dupacks = 0xce,
-  cwnd = 0xea7c,
-  ssthresh = 0x560b,
-  snd_nxt = 0xea7cce00,
-  snd_max = 0x560b,
-  snd_wnd = 0x0,
-  snd_wl1 = 0x0,
-  snd_wl2 = 0x5b10d6e,
-  snd_lbb = 0x7fd5,
-  acked = 0xd6f,
-  snd_buf = 0x5b1,
-  snd_queuelen = 0x7fd5,
-  unsent = 0x7fd505310700,
-  unacked = 0x7fd50530fe80,
-  ooseq = 0x560bea5aa751 <tcpip_thread+344>,
-  refused_data = 0x0,
-  sent = 0x0,
-  recv = 0x560bea7c86d8 <memp_memory+4728>,
-  connected = 0x69cd72e63fead100,
-  accept = 0x0,
-  poll = 0x7fd50733c08a <start_thread+218>,
-  errf = 0x0,
-  keep_idle = 0x5310700,
-  persist_cnt = 0x7fd5,
-  persist_backoff = 0x0,
-  keep_cnt_sent = 0x7
-}
-"""
 pcb = MY_SYMVAR_REGION_BEGIN + 0x16000
 state.mem[rebased_addr('tcp_active_pcbs')].uint64_t = pcb
 # state.mem[rebased_addr('tcp_active_pcbs') + 8].uint64_t = 0 # terminate with NULL
 state.mem[rebased_addr('udp_pcbs')].uint64_t = pcb
 symvar_pcb = state.se.BVS('pcb', 0xe0 * 8)
 if tcp:
-    state.add_constraints(NoReverse(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pcb)) == 0x0) # local ip
-    state.add_constraints(NoReverse(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pcb)) == 0x560b) # remote ip
-    state.add_constraints(NoReverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pcb)) == 0xff000002) # so_options, tos, ttl
-    state.add_constraints(NoReverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pcb)) == 0x0) # padding?
-    state.add_constraints(NoReverse(state.se.Extract(8 * 24 - 1, 8 * 16, symvar_pcb)) == 0) # next
-    state.add_constraints(NoReverse(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pcb)) == symvar_listen_pcbs_state) # state
+    pass
 elif udp:
-    """
-gdb-peda$ p *udp_pcbs
-$2 = {
-  local_ip = {
-    addr = 0x0
-  },
-  remote_ip = {
-    addr = 0x0
-  },
-  so_options = 0x0,
-  tos = 0x0,
-  ttl = 0xff,
-  next = 0x0, // + 16
-  flags = 0x0,
-  local_port = 0x7, // + 24
-  remote_port = 0x0, // + 26
-  recv = 0x55b3c4ce893d <recv_udp>,
-  recv_arg = 0x55b3c4f082a0 <memp_memory+3648>
-}
-
-gdb-peda$ x/20wx udp_pcbs
-0x55b3c4f07580 <memp_memory+288>:   0x00000000  0x00000000  0xff000000  0x00000000
-0x55b3c4f07590 <memp_memory+304>:   0x00000000  0x00000000  0x00070000  0x00000000
-0x55b3c4f075a0 <memp_memory+320>:   0xc4ce893d  0x000055b3  0xc4f082a0  0x000055b3 // + 32
-0x55b3c4f075b0 <memp_memory+336>:   0x00000000  0x00000000  0x00000000  0x00000000
-0x55b3c4f075c0 <memp_memory+352>:   0x00000000  0x00000000  0x00000000  0x00000000
-    """
     state.add_constraints(NoReverse(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pcb)) == 0x0) # remote ip
     state.add_constraints(NoReverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pcb)) == 0xff000000) # so_options, tos, ttl
     state.add_constraints(NoReverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pcb)) == 0x0) # padding?
@@ -601,8 +421,9 @@ gdb-peda$ x/20wx udp_pcbs
     state.add_constraints(NoReverse(state.se.Extract(8 * 26 - 1, 8 * 24, symvar_pcb)) == 0x7) # local_port
     state.add_constraints(NoReverse(state.se.Extract(8 * 28 - 1, 8 * 26, symvar_pcb)) == 0x0) # remote_port
     state.add_constraints(NoReverse(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pcb)) == 0x0) # padding?
-    # state.add_constraints(NoReverse(state.se.Extract(8 * 40 - 1, 8 * 32, symvar_pcb)) == rebased_addr('recv_udp')) # recv
+    pass
 state.memory.store(pcb, state.se.Reverse(symvar_pcb))
+### ===== end of Do not delete me ====================================
 
 if dns:
     print "[*] satisfying calling convention for dns"
@@ -671,10 +492,6 @@ def step_func(lpg):
         if find is not []:
             lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
         lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
-        # if find is not []:
-        #     lpg.stash(filter_func=lambda path: path.addr not in find, from_stash='threadlocal', to_stash='found')
-        # if avoid is not []:
-        #     lpg.stash(filter_func=lambda path: path.addr not in avoid, from_stash='threadlocal', to_stash='avoid')
     else:
         if find is not []:
             lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
@@ -714,18 +531,6 @@ print "[*] explore finished!!"
 print "[*] mode:"
 print "\tTHREADING = %r" % (THREADING)
 print "\tDEPTH_FIRST = %r" % (DEPTH_FIRST)
-
-# if len(simgr.errored) > 0:
-#     print "[*] analysis succeeded!"
-# else:
-#     print "[!] no solutions"
-# for i, errored in enumerate(simgr.errored):
-#     se = errored.state.plugins['solver_engine']
-#     payload_len = se.eval(symvar_pbuf_tot_len)
-#     print "errored #{0:d}: pbuf->tot_len: {1:#x} ({1:d})".format(i, payload_len)
-#     v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
-#     print "errored #%d: pbuf->payload:" % (i)
-#     hexdump.hexdump(v)
 
 RESULT_PY = "result.py"
 RESULT_TXT = "result.txt"
@@ -815,6 +620,8 @@ if IS_ROOT and PACKET_NO == -1:
         print "found #%d: pbuf.payload (= L2 Payload): " % (i)
         v = found.se.eval(found.memory.load(pbuf_payload, L2_PAYLOAD_MAX_LEN), cast_to=str)[:l2_payload_len]
         hexdump.hexdump(v[:l2_payload_len])
+        anrrs = ord(v[6]) * 0x100 + ord(v[7])
+        print "found #{:d}: DNS: Answer RRs: (0x{:#x}) %d".format(i, anrrs)
         result.write("""\n
 ### this is Packet #{no:d}
 print("[*] ==== [Packet #{no:d}] ====")
@@ -861,17 +668,19 @@ else: # preview mode
         print "errored #%d: stderr:\n%r" % (i, posix.dumps(2))
         payload_len = se.eval(symvar_pbuf_tot_len)
         print "errored #{0:d}: pbuf->tot_len: {1:#x} ({1:d})".format(i, payload_len)
-        v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
-        # v = se.eval(memory.load(pbuf_payload, L2_PAYLOAD_MAX_LEN), cast_to=str)[:payload_len]
+        v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)
+        # v = se.eval(memory.load(pbuf_payload, L2_PAYLOAD_MAX_LEN), cast_to=str)
         print "errored #%d: pbuf->payload:" % (i)
-        hexdump.hexdump(v)
+        hexdump.hexdump(v[:payload_len])
+        anrrs = ord(v[6]) * 0x100 + ord(v[7])
+        print "errored #{0:d}: DNS: Answer RRs: ({1:#x}) {1:d}".format(i, anrrs)
         result.write("""\n
 ### this is Packet #{no:d}
 print("[*] ==== [Packet #{no:d}] ====")
 print("found #{no:d}: pbuf.payload:")
 payload_len = {len:}
 v = pickle.loads({dump!r})
-v = v[:payload_len] # trim unused padding
+v = v[:payload_len] # trim unused payload
 # p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/{layer!s}(_pkt=v) # FIXME: dport must be corrected
 p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/Raw(v) # FIXME: dport must be corrected
 
@@ -917,6 +726,7 @@ if FOUND_RESULT:
     OUTPUT_DIR = "./output-last/"
     os.system("if [ ! -d {dir} ]; then mkdir {dir}; else rm -rf {dir}/*; fi".format(dir=OUTPUT_DIR))
     os.system("cp {_from!s} {_to!s}".format(_from=sys.argv[0], _to=OUTPUT_DIR)) # this solver script
+    os.system("chmod -w {_to!s}/{_from!s}".format(_from=sys.argv[0], _to=OUTPUT_DIR)) # this solver script
     for x in [RESULT_TXT, RESULT_PY, ANGR_LOG, TRACE_SAVE_DIR]:
         os.system("mv {_from!s} {_to!s}".format(_from=x, _to=OUTPUT_DIR))
     print "[*] output files are saved to {!s}".format(OUTPUT_DIR)
