@@ -26,7 +26,7 @@ Installation
 Install fallawing package needed.
 
 ```bash
-sudo apt install python python-pip pypy pypy-dev libffi-dev libncurses5-dev
+sudo apt install python python-pip pypy pypy-dev graphviz libffi-dev libncurses5-dev 
 ```
 
 ### git clone
@@ -37,7 +37,7 @@ git clone  --recursive https://github.com/ertlnagoya/lwip-bug-finder.git
 ### build simhost with each versions of lwip (NOT WORKING)
 `build-full-version-simhost.sh` builds simhosts to `./bin`.
 
-I git added my `simhost-STABLE-1_3_0`.
+I git added my `simhost-STABLE-1_3_0` and `echop-STABLE-1_3_0` for my solver.
 
 
 Usage
@@ -45,7 +45,7 @@ Usage
 ### to find [bug #24596](http://savannah.nongnu.org/bugs/?24596)
 (runtime: < 30 sec)
 
-Running `lwip-solve.py` will generates attack packet and saves result to `result.py`.
+Running `lwip-solve-bug22983.py` will generates attack packet and saves result to `result.py`.
 
 Run `sudo ./simhost-STABLE-XXX -d` and run `sudo python result.py 0` to attack simhost. Version of lwip must be 1.x.
 
