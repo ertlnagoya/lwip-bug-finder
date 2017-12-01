@@ -49,6 +49,8 @@ Running `lwip-solve-bug22983.py` will generates attack packet and saves result t
 
 Run `sudo ./simhost-STABLE-XXX -d` and run `sudo python result.py 0` to attack simhost. Version of lwip must be 1.x.
 
+`script/lwip-bug22983.py` is PoC of this lwip [bug #24596](http://savannah.nongnu.org/bugs/?24596).
+
 ### to find DNS bugs
 (runtime: ??? sec)
 
