@@ -1,0 +1,18 @@
+# usage: gnuplot ./plot-pypy-mem-usage.gnuplot-script
+
+# orig https://stackoverflow.com/questions/34942796/shell-cmd-date-without-new-line-in-the-end
+set term png small size 800,600
+set output "angr-mem-graph.png"
+
+set xlabel "Time (10 sec)"
+set ylabel "VSZ (KB)"
+set y2label "%MEM"
+
+set ytics nomirror
+set y2tics nomirror in
+
+set yrange [0:*]
+set y2range [0:*]
+
+plot "angr-mem.log" using 4 with lines axes x1y1 title "VSZ", \
+     "angr-mem.log" using 3 with lines axes x1y2 title "%MEM"
