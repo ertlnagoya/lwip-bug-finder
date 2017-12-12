@@ -354,10 +354,10 @@ gdb-peda$ x/12wx p->payload
 # state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
 
 ### block 1
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
 
 ### block 2
 state.add_constraints(LittleEndian(state.se.Extract(8 * 36 - 1, 8 * 32, symvar_pbuf_payload)) == 0x77777703)
@@ -366,11 +366,11 @@ state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_p
 state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
 
 ### block 3
-state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
-## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
+# ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
 
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
@@ -382,7 +382,6 @@ hexdump.hexdump(v[:0x40])
 ### load initalized object values
 print "[*] loading initalized objects to engine:"
 for objname, objval in dump.items():
-# for (objname, objval) in {'dns_table': dump['dns_table']}.items():
     begin = rebased_addr(objname)
     print "\tloading %s ... (addr = %#x)" % (objname, begin)
     for i, v in enumerate(objval):
@@ -761,6 +760,20 @@ Trace (state history):
 """.format(host=os.uname()[1], date=datetime.datetime.today().strftime("%Y/%m/%d %H:%M:%S"),
         cmd=' '.join(proc_cmdline()), run_time=dhms(run_time), cpu_time=dhms(cpu_time),
         txt=RESULT_TXT, py=RESULT_PY, log=ANGR_LOG))
+
+import ipdb; ipdb.set_trace()
+
+constraint_expr = simgr.errored[0].state.plugins['solver_engine'].constraints
+for s in simgr.active:
+    s.add_constraints(s.se.Or(*[s.se.Not(x) for x in constraint_expr]))
+simgr.stash(filter_func=lambda path: not path.satisfiable(), from_stash='active', to_stash='unsat')
+if DEPTH_FIRST:
+    for s in simgr.deferred:
+        s.add_constraints(s.se.Or(*[s.se.Not(x) for x in constraint_expr]))
+    simgr.stash(filter_func=lambda path: not path.satisfiable(), from_stash='deferred', to_stash='unsat')
+simgr.drop('unsat')
+
+simgr.step(step_func=step_func, until=len(simgr.errored) > 0)
 
 import ipdb; ipdb.set_trace()
 

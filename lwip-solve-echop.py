@@ -85,6 +85,18 @@ def signal_handler(signal, frame):
 signal.signal(signal.SIGINT, signal_handler) # Ctrl+C
 ### ==================================================================
 
+### ==================================================================
+# ref: https://qiita.com/ynakayama/items/c51c2b6d6a3818bdb63f#%E5%AF%BE%E8%A9%B1%E7%9A%84%E3%83%87%E3%83%90%E3%83%83%E3%82%AC
+def set_trace():
+    from IPython.core.debugger import Pdb
+    Pdb(color_scheme='Linux').set_trace(sys._getframe().f_back)
+
+def debug(f, *args, **kwargs):
+    from IPython.core.debugger import Pdb
+    pdb = Pdb(color_scheme='Linux')
+    return pdb.runcall(f, *args, **kwargs)
+### ==================================================================
+
 def dump_regs(state, _exit=True):
     global symvar_listen_pcbs, symbar_netif
     print "rax = %#x" % state.solver.eval(state.regs.rax)
@@ -185,8 +197,47 @@ MAPPED_LENGTH = 0x3000
 
 ### change options
 state.options.add("STRICT_PAGE_ACCESS") # to handle SEGV
-state.options.add("REPLACEMENT_SOLVER")
+# state.options.add("REPLACEMENT_SOLVER")
 # import ipdb; ipdb.set_trace()
+
+### add inspecter
+def is_outboud_read_access(state):
+    read_addr = state.inspect.mem_read_address
+    return state.solver.satisfiable(extra_constraints=[state.solver.And(
+        read_addr > 0x00620000,
+        read_addr < 0x015ae000,
+        )])
+
+def debug_funcRead(state):
+    global simgr
+    if state.addr not in [0x404aac]:
+        return
+    print '>> Read', state.inspect.mem_read_expr, 'from', state.inspect.mem_read_address
+    read_addr = state.inspect.mem_read_address
+    if read_addr.symbolic:
+        print "[*] satisfiable: %s" % repr(is_outboud_read_access(state))
+        if is_outboud_read_access(state):
+            try:
+                print "[*] found memory access violation"
+                # state.add_constraints(state.solver.And(
+                # read_addr > 0x00620000,
+                # read_addr < 0x015ae000,
+                # )) # NOT WORKS (lifetime of `state` is short?)
+                print "[*] pbuf->payload:"
+                payload_len = state.solver.eval(symvar_pbuf_tot_len)
+                v = state.solver.eval(state.solver.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
+                hexdump.hexdump(v)
+                for active in simgr.active:
+                    active.add_constraints(state.solver.And(
+                    read_addr > 0x00620000,
+                    read_addr < 0x015ae000,
+                    ))
+                import ipdb; ipdb.set_trace()
+            except Exception as e:
+                print "[!] Exception: ", e
+                import ipdb; ipdb.set_trace()
+if True:
+    state.inspect.b("mem_read", when=angr.BP_BEFORE, action=debug_funcRead)
 
 ### helper boolean
 tcp = (start_addr == rebased_addr('tcp_input'))
@@ -331,10 +382,10 @@ gdb-peda$ x/12wx p->payload
 # state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
 
 ### block 1
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
+state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
 
 ### block 2
 state.add_constraints(LittleEndian(state.se.Extract(8 * 36 - 1, 8 * 32, symvar_pbuf_payload)) == 0x77777703)
@@ -343,11 +394,13 @@ state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_p
 state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
 
 ### block 3
-state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
-## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
+# ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
+# state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
+
+state.add_constraints(state.se.Extract(symvar_pbuf_payload.size() - 1, 8 * 64, symvar_pbuf_payload) == 0)
 
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
@@ -666,7 +719,7 @@ simgr = proj.factory.simgr(state)
 THREADING = True
 THREADING = False
 DEPTH_FIRST = True
-# DEPTH_FIRST = False
+DEPTH_FIRST = False
 if THREADING:
     print "[*] simgr.use_technique: Threading enabled"
     simgr.use_technique(angr.exploration_techniques.Threading(6)) # NOTE: pypy & python2 causes segmentation fault
@@ -690,12 +743,8 @@ print "[*] avoid = %s" % str(map(lambda x: hex(x), avoid))
 # proj.hook(0x400000 + 0x1c730, dump_regs, length=4)
 # proj.hook(0x400000 + 0x1cecf, dump_regs, length=5)
 
-import random
-random = random.Random()
-random.seed(10)
-prev_deferred_len = -1
 def step_func(lpg):
-    global find, avoid, THREADING, DEPTH_FIRST, random, prev_deferred_len
+    global find, avoid, THREADING, DEPTH_FIRST
     if THREADING:
         if find is not []:
             lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
@@ -735,24 +784,13 @@ def until_func(lpg):
 time.sleep(5)
 assert(avoid is not [])
 simgr.step(step_func=step_func, until=until_func) # explore until error occurs (or active stashes exhausts)
+
 print "[*] explore finished!!"
 # exit(1) # to utilize vmprof
 
 print "[*] mode:"
 print "\tTHREADING = %r" % (THREADING)
 print "\tDEPTH_FIRST = %r" % (DEPTH_FIRST)
-
-# if len(simgr.errored) > 0:
-#     print "[*] analysis succeeded!"
-# else:
-#     print "[!] no solutions"
-# for i, errored in enumerate(simgr.errored):
-#     se = errored.state.plugins['solver_engine']
-#     payload_len = se.eval(symvar_pbuf_tot_len)
-#     print "errored #{0:d}: pbuf->tot_len: {1:#x} ({1:d})".format(i, payload_len)
-#     v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
-#     print "errored #%d: pbuf->payload:" % (i)
-#     hexdump.hexdump(v)
 
 RESULT_PY = "result.py"
 RESULT_TXT = "result.txt"
@@ -846,10 +884,13 @@ if IS_ROOT and PACKET_NO == -1:
         print "found #%d: pbuf.payload (= L2 Payload): " % (i)
         v = found.se.eval(found.se.Reverse(symvar_pbuf_payload), cast_to=str)
         hexdump.hexdump(v[:l2_payload_len])
+        if dns:
+            anrrs = ord(v[6]) * 0x100 + ord(v[7])
+            print "found #{0:d}: DNS: Answer RRs: ({1:#x}) {1:d}".format(i, anrrs)
         result.write("""\n
 ### this is Packet #{no:d}
 print("[*] ==== [Packet #{no:d}] ====")
-print("found #{no:d}: pbuf.payload:")
+print("Packet #{no:d}: pbuf.payload:")
 l2_payload_len = {len:}
 v = pickle.loads({dump!r})
 if {ip!r}: # is IP packet?
@@ -892,14 +933,17 @@ else: # preview mode
         print "errored #%d: stderr:\n%r" % (i, posix.dumps(2))
         payload_len = se.eval(symvar_pbuf_tot_len)
         print "errored #{0:d}: pbuf->tot_len: {1:#x} ({1:d})".format(i, payload_len)
-        # v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
-        v = se.eval(memory.load(pbuf_payload, 0x100), cast_to=str)[:payload_len]
+        v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
+        # v = se.eval(memory.load(pbuf_payload, 0x100), cast_to=str)[:payload_len]
         print "errored #%d: pbuf->payload:" % (i)
         hexdump.hexdump(v)
+        if dns:
+            anrrs = ord(v[6]) * 0x100 + ord(v[7])
+            print "errored #{0:d}: DNS: Answer RRs: ({1:#x}) {1:d}".format(i, anrrs)
         result.write("""\n
 ### this is Packet #{no:d}
 print("[*] ==== [Packet #{no:d}] ====")
-print("found #{no:d}: pbuf.payload:")
+print("Packet #{no:d}: pbuf.payload:")
 payload_len = {len:}
 v = pickle.loads({dump!r})
 v = v[:payload_len] # trim unused padding
@@ -911,8 +955,7 @@ try:
     p.show2()
 except Exception as e:
     print(e)
-    print("p.show() errored.")
-b = bytes(p)[:payload_len]
+b = bytes(p)
 
 if IS_ROOT and PACKET_NO == {no:d}: # send mode
     ### write your script here...
@@ -948,7 +991,7 @@ if FOUND_RESULT:
     OUTPUT_DIR = "./output-last/"
     os.system("if [ ! -d {dir} ]; then mkdir {dir}; else rm -rf {dir}/*; fi".format(dir=OUTPUT_DIR))
     os.system("cp {_from!s} {_to!s}".format(_from=sys.argv[0], _to=OUTPUT_DIR)) # this solver script
-    for x in [RESULT_TXT, RESULT_PY, ANGR_LOG, TRACE_SAVE_DIR]:
+    for x in [RESULT_TXT, RESULT_PY, "*.log", TRACE_SAVE_DIR]:
         os.system("mv {_from!s} {_to!s}".format(_from=x, _to=OUTPUT_DIR))
     print "[*] output files are saved to {!s}".format(OUTPUT_DIR)
 
