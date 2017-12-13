@@ -10,6 +10,7 @@ except ImportError as e:
     exit(1)
 import os, sys, signal
 import pickle, json
+import struct
 import hexdump
 import time, datetime
 
@@ -223,6 +224,11 @@ except IOError as e:
 print "[*] loading memory dump"
 DUMP_FILE = ELF_FILE + ".dump"
 try:
+    """
+    # gdb mem dump version
+    with open(DUMP_FILE, 'rb') as f:
+        dump = f.read()
+    """
     with open(DUMP_FILE) as f:
         dump = json.load(f)
 except IOError as e:
@@ -380,6 +386,16 @@ hexdump.hexdump(v[:0x40])
 # exit()
 
 ### load initalized object values
+print "[*] loading memory dump to engine:"
+"""
+# gdb-peda$ dump binary memory echop-STABLE-1_3_0.dump 0x00619000 0x00620000-1
+remainder = len(dump) % 4
+if remainder > 0:
+    dump += b'\0' * (4 - remainder)
+for i, u in enumerate([dump[i:i+4] for i in range(0, len(dump), 4)]):
+    v = struct.unpack('<I', u)[0]
+    state.mem[0x00619000 + i * 4].uint32_t = v
+"""
 print "[*] loading initalized objects to engine:"
 for objname, objval in dump.items():
     begin = rebased_addr(objname)
@@ -388,42 +404,44 @@ for objname, objval in dump.items():
         state.mem[begin + i * 4].uint32_t = v
 v = state.se.eval(state.memory.load(rebased_addr("dns_table"), 0x120), cast_to=str)
 hexdump.hexdump(v)
+# import ipdb; ipdb.set_trace()
 # exit()
 
 ### ===== Do not delete me ===========================================
 ### Or you correct modles cannot be obtained
 ### symbolize tcp/udp pcbs
-print "[*] symbolizing tcp/udp pcbs"
-listen_pcbs = MY_SYMVAR_REGION_BEGIN + 0x10000
-callback_arg = listen_pcbs + sizeof("tcp_listen_pcbs")
-state.mem[rebased_addr('tcp_listen_pcbs')].uint64_t = listen_pcbs
-state.mem[callback_arg + 0].uint32_t = 0x00000010
-state.mem[callback_arg + 4].uint32_t = 0x00000002
-symvar_listen_pcbs = state.se.BVS('listen_pcbs', 56 * 8)
-symvar_listen_pcbs_state = state.se.BVS('listen_pcbs', 4 * 8)
-state.memory.store(listen_pcbs, state.se.Reverse(symvar_listen_pcbs))
+# print "[*] symbolizing tcp/udp pcbs"
+# listen_pcbs = MY_SYMVAR_REGION_BEGIN + 0x10000
+# callback_arg = listen_pcbs + sizeof("tcp_listen_pcbs")
+# state.mem[rebased_addr('tcp_listen_pcbs')].uint64_t = listen_pcbs
+# state.mem[callback_arg + 0].uint32_t = 0x00000010
+# state.mem[callback_arg + 4].uint32_t = 0x00000002
+# symvar_listen_pcbs = state.se.BVS('listen_pcbs', 56 * 8)
+# symvar_listen_pcbs_state = state.se.BVS('listen_pcbs', 4 * 8)
+# state.memory.store(listen_pcbs, state.se.Reverse(symvar_listen_pcbs))
 
-### symbolize tcp_active_pcbs
-print "[*] symbolizing tcp_active_pcbs"
-pcb = MY_SYMVAR_REGION_BEGIN + 0x16000
-state.mem[rebased_addr('tcp_active_pcbs')].uint64_t = pcb
-# state.mem[rebased_addr('tcp_active_pcbs') + 8].uint64_t = 0 # terminate with NULL
-state.mem[rebased_addr('udp_pcbs')].uint64_t = pcb
-symvar_pcb = state.se.BVS('pcb', 0xe0 * 8)
-if tcp:
-    pass
-elif udp:
-    state.add_constraints(NoReverse(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pcb)) == 0x0) # remote ip
-    state.add_constraints(NoReverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pcb)) == 0xff000000) # so_options, tos, ttl
-    state.add_constraints(NoReverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pcb)) == 0x0) # padding?
-    state.add_constraints(NoReverse(state.se.Extract(8 * 24 - 1, 8 * 16, symvar_pcb)) == 0) # next
-    state.add_constraints(NoReverse(state.se.Extract(8 * 26 - 1, 8 * 24, symvar_pcb)) == 0x7) # local_port
-    state.add_constraints(NoReverse(state.se.Extract(8 * 28 - 1, 8 * 26, symvar_pcb)) == 0x0) # remote_port
-    state.add_constraints(NoReverse(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pcb)) == 0x0) # padding?
-    pass
-state.memory.store(pcb, state.se.Reverse(symvar_pcb))
+# ### symbolize tcp_active_pcbs
+# print "[*] symbolizing tcp_active_pcbs"
+# pcb = MY_SYMVAR_REGION_BEGIN + 0x16000
+# state.mem[rebased_addr('tcp_active_pcbs')].uint64_t = pcb
+# # state.mem[rebased_addr('tcp_active_pcbs') + 8].uint64_t = 0 # terminate with NULL
+# state.mem[rebased_addr('udp_pcbs')].uint64_t = pcb
+# symvar_pcb = state.se.BVS('pcb', 0xe0 * 8)
+# if tcp:
+#     pass
+# elif udp:
+#     state.add_constraints(NoReverse(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pcb)) == 0x0) # remote ip
+#     state.add_constraints(NoReverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pcb)) == 0xff000000) # so_options, tos, ttl
+#     state.add_constraints(NoReverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pcb)) == 0x0) # padding?
+#     state.add_constraints(NoReverse(state.se.Extract(8 * 24 - 1, 8 * 16, symvar_pcb)) == 0) # next
+#     state.add_constraints(NoReverse(state.se.Extract(8 * 26 - 1, 8 * 24, symvar_pcb)) == 0x7) # local_port
+#     state.add_constraints(NoReverse(state.se.Extract(8 * 28 - 1, 8 * 26, symvar_pcb)) == 0x0) # remote_port
+#     state.add_constraints(NoReverse(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pcb)) == 0x0) # padding?
+#     pass
+# state.memory.store(pcb, state.se.Reverse(symvar_pcb))
 ### ===== end of Do not delete me ====================================
 
+### symbolize function call arguments
 if dns:
     print "[*] satisfying calling convention for dns"
     """
@@ -438,20 +456,7 @@ if dns:
     state.regs.rdx = pbuf_ptr # pbuf
     state.regs.rcx = 0        # addr (UNUSED)
     state.regs.r8 = 0         # port (UNUSED)
-# elif ip:
-#     """
-#     void    tcp_input(struct pbuf *p, struct netif *inp)
-#     void    udp_input(struct pbuf *p, struct netif *inp)
-#     """
-#     state.regs.rdi = pbuf_ptr
-#     state.regs.rsi = netif_ptr # inp_ptr
-# elif etharp_arp:
-#     """
-#     void    etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
-#     """
-#     state.regs.rdi = netif_ptr
-#     state.regs.rsi = ethaddr_ptr
-#     state.regs.rdx = pbuf_ptr
+
 
 ### load initial state to engine (Simulation Manager)
 simgr = proj.factory.simgr(state)
@@ -459,8 +464,8 @@ simgr = proj.factory.simgr(state)
 ### use exploration techniques
 THREADING = True
 THREADING = False
-DEPTH_FIRST = True
-# DEPTH_FIRST = False
+DEPTH_FIRST = True # DFS Option
+# DEPTH_FIRST = False # DFS Option
 if THREADING:
     print "[*] simgr.use_technique: Threading enabled"
     simgr.use_technique(angr.exploration_techniques.Threading(6)) # NOTE: pypy & python2 causes segmentation fault
@@ -480,13 +485,8 @@ avoid += [rebased_addr('pbuf_free')]
 print "[*] find = %s" % str(map(lambda x: hex(x), find))
 print "[*] avoid = %s" % str(map(lambda x: hex(x), avoid))
 
-### debugging
-# proj.hook(0x400000 + 0x1c730, dump_regs, length=4)
-# proj.hook(0x400000 + 0x1cecf, dump_regs, length=5)
-
-avoid_paths = set()
 def step_func(lpg):
-    global find, avoid, THREADING, DEPTH_FIRST, avoid_paths
+    global find, avoid, THREADING, DEPTH_FIRST
     if THREADING:
         if find is not []:
             lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
@@ -496,8 +496,6 @@ def step_func(lpg):
             lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
         lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
 
-    for x in simgr.avoid:
-        avoid_paths.add(x.addr)
     lpg.drop(stash='avoid') # memory usage optimization
 
     # if THREADING:
@@ -538,8 +536,6 @@ ftxt = open(RESULT_TXT, 'w')
 fout = sys.stdout
 sys.stdout = ftxt # redirect to a file
 FOUND_RESULT = len(simgr.found) > 0 or len(simgr.errored) > 0
-if len(avoid_paths):
-    print("[*] avoid paths: %s" % ', '.join([hex(x) for x in avoid_paths]))
 if FOUND_RESULT:
     plot_trace()
     ### save results

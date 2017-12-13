@@ -65,7 +65,8 @@ for x in isj_ret:
 # print(symbols)
 
 fdump = open("dump.py", "w")
-fdump.write("""### NOTE: run this script in gdb, not shell.
+fdump.write("""### NOTE: THIS IS A GENERATED SCRIPT BY analyze.py
+### NOTE: run this script in gdb, NOT shell.
 import gdb
 import json
 
