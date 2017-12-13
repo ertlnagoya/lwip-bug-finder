@@ -1,5 +1,6 @@
 #!/usr/bin/python2
 # encoding: utf-8
+from argparse import ArgumentParser
 import angr #the main framework
 import claripy #the solver engine
 try:
@@ -14,8 +15,10 @@ import struct
 import hexdump
 import time, datetime
 
+###
 start_time = time.time() # start measure
 
+### angr's routine
 ANGR_LOG = "angr.log"
 angr.manager.l.setLevel("DEBUG")
 logging = angr.manager.logging
@@ -23,6 +26,25 @@ log_handler = logging.FileHandler(ANGR_LOG, mode='w')
 log_handler.setLevel(logging.DEBUG)
 log_handler.setFormatter(logging.Formatter('%(levelname)-7s | %(asctime)-23s | %(name)-8s | %(message)s'))
 angr.manager.l.addHandler(log_handler)
+
+### argparse routine
+desc = u'{0} [Args] [Options]\nDetailed options -h or --help'.format(__file__) # error message
+parser = ArgumentParser(description=desc)
+parser.add_argument(
+        '-f', '--start_func',
+        type=str,          # 受け取る値の型を指定する
+        dest='start_func', # 保存先変数名
+        required=True,     # 必須項目
+        help='function name to start analysis' # --help時に表示する文
+    )
+parser.add_argument(
+        '-b', '--constrained_blocks',
+        type=str,          # 受け取る値の型を指定する
+        dest='constrained_blocks', # 保存先変数名
+        required=False,     # 必須項目
+        help='constrained blocks. e.g. -b \'-b 1,2\'' # --help時に表示する文
+    )
+args = parser.parse_args()
 
 ### ==================================================================
 TRACE_SAVE_DIR = "./trace/"
@@ -150,13 +172,19 @@ NoReverse = lambda x: x
 BigEndian = lambda x: state.se.Reverse(x)
 LittleEndian = lambda x: x
 
-### process argv
-if len(sys.argv) == 1:
-    usage()
-START_FUNC = sys.argv[1]
+### analysis start function
+START_FUNC = args.start_func
 if START_FUNC not in ['tcp_input', 'udp_input', 'etharp_arp_input', 'dns_recv']:
     print "[!] invalid function name"
     exit(1)
+
+### choose blocks to constrain
+CONSTRAINED_BLOCKS = [1, 2] # 0, 1, 2, 3
+if args.constrained_blocks:
+    CONSTRAINED_BLOCKS = [int(x) for x in args.constrained_blocks.split(',')]
+else:
+    CONSTRAINED_BLOCKS = []
+print "[*] CONSTRAINED_BLOCKS = %s" % (str(CONSTRAINED_BLOCKS))
 
 ### load binary
 ELF_FILE = "./bin/echop-STABLE-1_3_0"
@@ -171,13 +199,7 @@ state = proj.factory.blank_state(addr=start_addr)
 # import ipdb; ipdb.set_trace()
 
 ### add inspecter
-def debug_funcRead(state):
-    # print '>> Read', state.inspect.mem_read_expr, 'from', state.inspect.mem_read_address
-    addr_repr = repr(state.inspect.mem_read_address)
-    if "pcb" in addr_repr:
-        print '>> Read', state.inspect.mem_read_address, 'at', hex(state.addr)
-        exit(1)
-state.inspect.b("mem_read", when=angr.BP_AFTER, action=debug_funcRead)
+### TODO
 
 ### map new region for my symbolic variables
 """memo
@@ -270,7 +292,6 @@ try:
 except Exception as e:
     print e
     import ipdb; ipdb.set_trace()
-    raise e
 
 ### enable debug flag
 print "[*] enabling debug_flag"
@@ -303,8 +324,7 @@ pbuf_len = pbuf_ptr + 0x12
 pbuf_type = pbuf_ptr + 0x14
 pbuf_flags = pbuf_ptr + 0x15
 pbuf_ref = pbuf_ptr + 0x16
-# pbuf_payload = MAPPED_BEGIN # pbuf is located in section "mapped"
-pbuf_payload = 0x61f7a2
+pbuf_payload = 0x61f7a2 # pbuf is located in section "mapped"
 
 state.mem[pbuf_next].qword = 0 # NULL
 state.mem[pbuf_payload_ptr].qword = pbuf_payload # => p->payload == pbuf_payload
@@ -353,37 +373,44 @@ gdb-peda$ x/12wx p->payload
 0x61f7d2 <memp_memory+8978>:    0x01000100  0x00000000  0x007f0400  0x000c0100
 """
 ### block 0
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pbuf_payload)) == 0x80810000)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0x01000100) # Answer RRs = 0x01
-# ## state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
+if 0 in CONSTRAINED_BLOCKS:
+    print("[*] block 0 has constrained!")
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pbuf_payload)) == 0x80810000)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0x01000100) # Answer RRs = 0x01
+    ## state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
 
 ### block 1
-state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
+if 1 in CONSTRAINED_BLOCKS:
+    print("[*] block 1 has constrained!")
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
 
 ### block 2
-state.add_constraints(LittleEndian(state.se.Extract(8 * 36 - 1, 8 * 32, symvar_pbuf_payload)) == 0x77777703)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 40 - 1, 8 * 36, symvar_pbuf_payload)) == 0x6f6f6706)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_pbuf_payload)) == 0x03656c67)
-state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
+if 2 in CONSTRAINED_BLOCKS:
+    print("[*] block 2 has constrained!")
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 36 - 1, 8 * 32, symvar_pbuf_payload)) == 0x77777703)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 40 - 1, 8 * 36, symvar_pbuf_payload)) == 0x6f6f6706)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_pbuf_payload)) == 0x03656c67)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
 
 ### block 3
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
-# ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
-# state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
+if 3 in CONSTRAINED_BLOCKS:
+    print("[*] block 3 has constrained!")
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
+    ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
+    state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
 
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
 print "[*] pbuf->payload"
 v = state.se.eval(state.se.Reverse(symvar_pbuf_payload), cast_to=str)
 hexdump.hexdump(v[:0x40])
-# exit()
 
 ### load initalized object values
 print "[*] loading memory dump to engine:"
@@ -734,7 +761,7 @@ Host:
     {host}
 
 Executed date:
-    {date}
+    {date} (UTC)
 
 Run command:
     % {cmd!s}
@@ -753,7 +780,7 @@ angr's debug log:
 
 Trace (state history):
     ./trace
-""".format(host=os.uname()[1], date=datetime.datetime.today().strftime("%Y/%m/%d %H:%M:%S"),
+""".format(host=os.uname()[1], date=datetime.datetime.utcfromtimestamp(start_time).strftime("%Y/%m/%d %H:%M:%S"),
         cmd=' '.join(proc_cmdline()), run_time=dhms(run_time), cpu_time=dhms(cpu_time),
         txt=RESULT_TXT, py=RESULT_PY, log=ANGR_LOG))
 
