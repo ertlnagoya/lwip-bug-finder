@@ -44,6 +44,16 @@ parser.add_argument(
         required=False,     # 必須項目
         help='constrained blocks. e.g. -b \'-b 1,2\'' # --help時に表示する文
     )
+parser.add_argument(
+        '-d', '--dfs',
+        action='store_true', # store_trueでdestにTrueがはいる(store_falseもある)
+        dest='dfs'
+    )
+parser.add_argument(
+        '-s', '--segv',
+        action='store_true', # store_trueでdestにTrueがはいる(store_falseもある)
+        dest='check_segv'
+    )
 args = parser.parse_args()
 
 ### ==================================================================
@@ -186,6 +196,10 @@ else:
     CONSTRAINED_BLOCKS = []
 print "[*] CONSTRAINED_BLOCKS = %s" % (str(CONSTRAINED_BLOCKS))
 
+### explore options given by cmdline
+DEPTH_FIRST = args.dfs # DFS Option
+CHECK_SEGV = args.check_segv
+
 ### load binary
 ELF_FILE = "./bin/echop-STABLE-1_3_0"
 proj = angr.Project(ELF_FILE, load_options={'auto_load_libs': False})
@@ -199,7 +213,46 @@ state = proj.factory.blank_state(addr=start_addr)
 # import ipdb; ipdb.set_trace()
 
 ### add inspecter
-### TODO
+def is_outboud_read_access(state):
+    read_addr = state.inspect.mem_read_address
+    return state.solver.satisfiable(extra_constraints=[state.solver.And(
+        read_addr > 0x00620000,
+        read_addr < 0x015ae000,
+        )])
+
+def check_segv(state):
+    global simgr
+    if state.addr not in [0x404aac]:
+        return
+    print '>> Read', state.inspect.mem_read_expr, 'from', state.inspect.mem_read_address
+    read_addr = state.inspect.mem_read_address
+    if read_addr.symbolic:
+        print "[*] satisfiable: %s" % repr(is_outboud_read_access(state))
+        if is_outboud_read_access(state):
+            try:
+                print "[*] found memory access violation"
+                # state.add_constraints(state.solver.And(
+                # read_addr > 0x00620000,
+                # read_addr < 0x015ae000,
+                # )) # NOT WORKS (lifetime of `state` is short?)
+                print "[*] pbuf->payload:"
+                payload_len = state.solver.eval(symvar_pbuf_tot_len)
+                v = state.solver.eval(state.solver.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
+                hexdump.hexdump(v)
+                for active in simgr.active:
+                    active.add_constraints(state.solver.And(
+                    read_addr > 0x00620000,
+                    read_addr < 0x015ae000,
+                    ))
+                import ipdb; ipdb.set_trace()
+            except Exception as e:
+                print "[!] Exception: ", e
+                import ipdb; ipdb.set_trace()
+
+if CHECK_SEGV:
+    print "[*] Option enabled: check SEGV on memory access"
+    state.inspect.b("mem_read", when=angr.BP_BEFORE, action=check_segv)
+
 
 ### map new region for my symbolic variables
 """memo
@@ -491,8 +544,6 @@ simgr = proj.factory.simgr(state)
 ### use exploration techniques
 THREADING = True
 THREADING = False
-DEPTH_FIRST = True # DFS Option
-# DEPTH_FIRST = False # DFS Option
 if THREADING:
     print "[*] simgr.use_technique: Threading enabled"
     simgr.use_technique(angr.exploration_techniques.Threading(6)) # NOTE: pypy & python2 causes segmentation fault
@@ -763,7 +814,7 @@ Host:
 Executed date:
     {date} (UTC)
 
-Run command:
+Command line:
     % {cmd!s}
 
 Run time (Hour:Min:Sec):
