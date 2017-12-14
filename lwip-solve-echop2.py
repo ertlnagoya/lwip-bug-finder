@@ -222,10 +222,12 @@ def is_outboud_read_access(state):
 
 def check_segv(state):
     global simgr
-    if state.addr not in [0x404aac]:
-        return
+    # if state.addr not in [0x404aac]: ### short-cut for debuging
+    #     return
     print '>> Read', state.inspect.mem_read_expr, 'from', state.inspect.mem_read_address
     read_addr = state.inspect.mem_read_address
+    if not hasattr(read_addr, 'symbolic'):
+        return
     if read_addr.symbolic:
         print "[*] satisfiable: %s" % repr(is_outboud_read_access(state))
         if is_outboud_read_access(state):
@@ -244,7 +246,7 @@ def check_segv(state):
                     read_addr > 0x00620000,
                     read_addr < 0x015ae000,
                     ))
-                import ipdb; ipdb.set_trace()
+                # import ipdb; ipdb.set_trace()
             except Exception as e:
                 print "[!] Exception: ", e
                 import ipdb; ipdb.set_trace()
@@ -835,20 +837,6 @@ Trace (state history):
         cmd=' '.join(proc_cmdline()), run_time=dhms(run_time), cpu_time=dhms(cpu_time),
         txt=RESULT_TXT, py=RESULT_PY, log=ANGR_LOG))
 
-import ipdb; ipdb.set_trace()
-
-constraint_expr = simgr.errored[0].state.plugins['solver_engine'].constraints
-for s in simgr.active:
-    s.add_constraints(s.se.Or(*[s.se.Not(x) for x in constraint_expr]))
-simgr.stash(filter_func=lambda path: not path.satisfiable(), from_stash='active', to_stash='unsat')
-if DEPTH_FIRST:
-    for s in simgr.deferred:
-        s.add_constraints(s.se.Or(*[s.se.Not(x) for x in constraint_expr]))
-    simgr.stash(filter_func=lambda path: not path.satisfiable(), from_stash='deferred', to_stash='unsat')
-simgr.drop('unsat')
-
-simgr.step(step_func=step_func, until=len(simgr.errored) > 0)
-
-import ipdb; ipdb.set_trace()
+# import ipdb; ipdb.set_trace()
 
 ### you can send generated packets with result.py. enjoy:)
