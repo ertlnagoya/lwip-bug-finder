@@ -224,7 +224,7 @@ def check_segv(state):
     global simgr
     # if state.addr not in [0x404aac]: ### short-cut for debuging
     #     return
-    print '>> Read', state.inspect.mem_read_expr, 'from', state.inspect.mem_read_address
+    print '>> Read', state.inspect.mem_read_expr, 'from', repr(state.inspect.mem_read_address)[:240]
     read_addr = state.inspect.mem_read_address
     if not hasattr(read_addr, 'symbolic'):
         return

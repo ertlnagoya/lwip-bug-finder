@@ -1,6 +1,7 @@
 build_failure.txt
 result.py
 dump.py
+angr.log
 
 trace**/
 output-*/
