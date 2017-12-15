@@ -44,6 +44,31 @@ I git added my `simhost-STABLE-1_3_0` and `echop-STABLE-1_3_0` for my solver.
 
 Usage
 ----
+### memory-dump.py
+This is memory dump utility.
+Dumps process memory and save dumps with zip format.
+You must specificate target binary name ans memory areas using arguments.
+
+dump steps: 
+
+1. load this script in gdb attached to target process
+2. run `python memory_dump(BIN_NAME, [(begin,end)])`
+    * `(begin, end)` is a address pair of memory area
+
+for example:
+
+```
+$ sudo gdb -p `pgrep echop`
+[...]
+gdb-peda$ source /media/sf_share/lwip/memory-dump.py 
+usage: python memory_dump(bin_name,[(begin,end), ...])
+gdb-peda$ python memory_dump("bin/echop-STABLE-1_3_0", [(0x00619000,0x00620000)])
+mem: 0x619000 0x620000
+[[6393856, 6422528, "memory-619000-620000"]]
+zip name: bin/echop-STABLE-1_3_0-dump.zip
+[*] memory dump done! Go on your analysis!
+```
+
 ### to find [bug #24596](http://savannah.nongnu.org/bugs/?24596)
 (runtime: < 30 sec)
 

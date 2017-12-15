@@ -11,6 +11,7 @@ except ImportError as e:
     exit(1)
 import os, sys, signal
 import pickle, json
+import zipfile
 import struct
 import hexdump
 import time, datetime
@@ -118,6 +119,35 @@ def signal_handler(signal, frame):
 signal.signal(signal.SIGINT, signal_handler) # Ctrl+C
 ### ==================================================================
 
+init_memory = {}
+def load_memory_dump(file_name):
+    global memory_dump
+    print "[*] loading memory dump: %s" % file_name
+    zf = zipfile.ZipFile(file_name)
+    print "\tzip file contains %s" % str(zf.namelist())
+    dump = {}
+    with zf.open('dump.json') as f:
+        dump = json.load(f)
+    for d in dump:
+        begin, end, file_name = d
+        print "\tfile: %s" % file_name
+        print "\tmem: %#x - %#x" % (begin, end)
+        with zf.open(file_name) as f:
+            init_memory[(begin, end)] = f.read()
+
+def read_memory_dump(addr, size):
+    global init_memory
+    for k, v in init_memory.items():
+        begin, end = k
+        if begin <= addr and (addr + size) <= end:
+            offset = addr - begin
+            ret = v[offset:offset+size]
+            r = size % 4
+            if r > 0:
+                ret += '\0' * (4 - r)
+            return ret
+    raise Exception("unmapped addr, size: %#x, %#x" % (addr, size))
+
 def dump_regs(state, _exit=True):
     global symvar_listen_pcbs, symbar_netif
     print "rax = %#x" % state.solver.eval(state.regs.rax)
@@ -148,6 +178,16 @@ def memory_dump(state, begin, length):
     for i in range(0, length):
         val = state.solver.eval(state.memory.load(begin + i, 1))
         ret += chr(val)
+    return ret
+
+def split_str(str, num):
+    ret = []
+    for i in range(num):
+        ret.append(str[i::num])
+    ret = ["".join(i) for i in zip(*ret)]
+    rem = len(str) % num  # remainder of zip()
+    if rem:
+        ret.append(str[-rem:])
     return ret
 
 def sizeof(symbol_name):
@@ -299,18 +339,27 @@ except IOError as e:
 
 ### load memory dump
 print "[*] loading memory dump"
-DUMP_FILE = ELF_FILE + ".dump"
+# DUMP_FILE = ELF_FILE + ".dump"
+# try:
+#     """
+#     # gdb mem dump version
+#     with open(DUMP_FILE, 'rb') as f:
+#         dump = f.read()
+#     """
+#     with open(DUMP_FILE) as f:
+#         dump = json.load(f)
+# except IOError as e:
+#     print e
+#     print "[!] run `./analysis.py %s %s` first" % (ELF_FILE, START_FUNC)
+#     exit()
+
+DUMP_FILE = ELF_FILE + "-dump.zip"
 try:
-    """
-    # gdb mem dump version
-    with open(DUMP_FILE, 'rb') as f:
-        dump = f.read()
-    """
-    with open(DUMP_FILE) as f:
-        dump = json.load(f)
+    load_memory_dump(DUMP_FILE)
 except IOError as e:
     print e
-    print "[!] run `./analysis.py %s %s` first" % (ELF_FILE, START_FUNC)
+    print "[!] there're no memory dumps"
+    print "[!] run `source ./memory-dump.py` in gdb first" % ()
     exit()
 
 ### disables function calls. and sets return value 0
@@ -479,11 +528,21 @@ for i, u in enumerate([dump[i:i+4] for i in range(0, len(dump), 4)]):
     state.mem[0x00619000 + i * 4].uint32_t = v
 """
 print "[*] loading initalized objects to engine:"
+"""
 for objname, objval in dump.items():
     begin = rebased_addr(objname)
     print "\tloading %s ... (addr = %#x)" % (objname, begin)
     for i, v in enumerate(objval):
         state.mem[begin + i * 4].uint32_t = v
+"""
+for objname in ["dns_table"]:
+    begin = rebased_addr(objname)
+    print "\tloading %s ... (addr = %#x)" % (objname, begin)
+    objval = read_memory_dump(begin, sizeof(objname))
+    for i, sv in enumerate(split_str(objval, 4)):
+        v = struct.unpack('<I', sv)[0]
+        state.mem[begin + i * 4].uint32_t = v
+
 v = state.se.eval(state.memory.load(rebased_addr("dns_table"), 0x120), cast_to=str)
 hexdump.hexdump(v)
 # import ipdb; ipdb.set_trace()

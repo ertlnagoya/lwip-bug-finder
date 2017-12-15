@@ -64,7 +64,7 @@ for x in isj_ret:
         symbols[flagname] = x
 # print(symbols)
 
-fdump = open("dump.py", "w")
+fdump = open("fetch-memory.py", "w")
 fdump.write("""### NOTE: THIS IS A GENERATED SCRIPT BY analyze.py
 ### NOTE: run this script in gdb, NOT shell.
 import gdb
