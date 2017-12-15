@@ -44,6 +44,22 @@ I git added my `simhost-STABLE-1_3_0` and `echop-STABLE-1_3_0` for my solver.
 
 Usage
 ----
+### analyze.py
+This is function/data dependency analysis utility.
+
+usage: `analyze.py ELF_FILE FUNCTION_NAME_TO_START_ANALYSIS`
+
+for example:
+
+```
+% ./analyze.py bin/echop-STABLE-1_3_0 dns_recv
+{'sym.snmp_mib_lrn_free', 'sym.pbuf_copy_partial', 'sym.memp_free', 'sym.dns_recv', 'sym.pbuf_free', 'sym.ntohl', 'sym.lwip_standard_chksum'}
+{'obj.memp_tab', 'obj.dns_table', 'obj.dns_payload'}
+```
+
+You see functions `snmp_mib_lrn_free`, `pbuf_copy_partial`, ... are called after `dns_recv` has called,
+and objects `memp_tab`, `dns_table`, `dns_payload` are referenced after `dns_recv` has called.
+
 ### memory-dump.py
 This is memory dump utility.
 Dumps process memory and save dumps with zip format.
@@ -58,7 +74,7 @@ dump steps:
 for example:
 
 ```
-$ sudo gdb -p `pgrep echop`
+$ sudo gdb -p `pgrep echop` ### attach to target process
 [...]
 gdb-peda$ source /media/sf_share/lwip/memory-dump.py 
 usage: python memory_dump(bin_name,[(begin,end), ...])
