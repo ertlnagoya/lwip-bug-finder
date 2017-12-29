@@ -1,7 +1,9 @@
 build_failure.txt
 result.py
 dump.py
+fetch-memory.py
 angr.log
+angr-mem-graph.png
 
 trace**/
 output-*/

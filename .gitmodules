@@ -4,3 +4,6 @@
 [submodule "lwip-contrib"]
 	path = lwip-contrib
 	url = git://git.savannah.gnu.org/lwip/lwip-contrib.git
+[submodule "asp-gr_peach_gcc-mbed"]
+	path = asp-gr_peach_gcc-mbed
+	url = https://github.com/ncesnagoya/asp-gr_peach_gcc-mbed.git
