@@ -1,0 +1,76 @@
+diff --git a/mbed-lib/EthernetInterface/lwip/core/dns.c b/mbed-lib/EthernetInterface/lwip/core/dns.c
+index d633612..6524467 100644
+--- a/mbed-lib/EthernetInterface/lwip/core/dns.c
++++ b/mbed-lib/EthernetInterface/lwip/core/dns.c
+@@ -85,7 +85,7 @@
+ 
+ /** DNS server IP address */
+ #ifndef DNS_SERVER_ADDRESS
+-#define DNS_SERVER_ADDRESS(ipaddr)        (ip4_addr_set_u32(ipaddr, ipaddr_addr("208.67.222.222"))) /* resolver1.opendns.com */
++#define DNS_SERVER_ADDRESS(ipaddr)        (ip4_addr_set_u32(ipaddr, ipaddr_addr("8.8.8.8"))) /* Google DNS */
+ #endif
+ 
+ /** DNS server port address */
+@@ -224,6 +224,39 @@ static ip_addr_t              dns_servers[DNS_MAX_SERVERS];
+ static u8_t                   dns_payload_buffer[LWIP_MEM_ALIGN_BUFFER(DNS_MSG_SIZE)];
+ static u8_t*                  dns_payload;
+ 
++// orig: https://gist.github.com/ccbrown/9722406
++void DumpHex(void* data, size_t size) {
++  char ascii[17];
++  size_t i, j;
++  ascii[16] = '\0';
++  for (i = 0; i < size; ++i) {
++    if (i % 16 == 0) {
++      printf("%08x | ", ((int) data) + i);
++    }
++    printf("%02X ", ((unsigned char*)data)[i]);
++    if (((unsigned char*)data)[i] >= ' ' && ((unsigned char*)data)[i] <= '~') {
++      ascii[i % 16] = ((unsigned char*)data)[i];
++    } else {
++      ascii[i % 16] = '.';
++    }
++    if ((i+1) % 8 == 0 || i+1 == size) {
++      printf(" ");
++      if ((i+1) % 16 == 0) {
++        printf("|  %s \n", ascii);
++      } else if (i+1 == size) {
++        ascii[(i+1) % 16] = '\0';
++        if ((i+1) % 16 <= 8) {
++          printf(" ");
++        }
++        for (j = (i+1) % 16; j < 16; ++j) {
++          printf("   ");
++        }
++        printf("|  %s \n", ascii);
++      }
++    }
++  }
++}
++
+ /**
+  * Initialize the resolver: set up the UDP pcb and configure the default server
+  * (DNS_SERVER_ADDRESS).
+@@ -303,7 +336,9 @@ void
+ dns_tmr(void)
+ {
+   if (dns_pcb != NULL) {
++    #if 0
+     LWIP_DEBUGF(DNS_DEBUG, ("dns_tmr: dns_check_entries\n"));
++    #endif
+     dns_check_entries();
+   }
+ }
+@@ -744,6 +779,12 @@ dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, ip_addr_t *addr, u16_t
+   LWIP_UNUSED_ARG(addr);
+   LWIP_UNUSED_ARG(port);
+ 
++  LWIP_DEBUGF(DNS_DEBUG, ("############ [dns_recv] ############\r\n"));
++  printf("pbuf:\n");
++  DumpHex((void *) p, (size_t) sizeof(struct pbuf));
++  printf("pbuf->payload (addr=%p):\n", p->payload);
++  DumpHex(p->payload, (size_t) p->tot_len);
++
+   /* is the dns message too big ? */
+   if (p->tot_len > DNS_MSG_SIZE) {
+     LWIP_DEBUGF(DNS_DEBUG, ("dns_recv: pbuf too big\n"));

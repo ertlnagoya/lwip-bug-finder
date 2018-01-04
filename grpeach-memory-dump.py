@@ -118,6 +118,17 @@ def get_symbol_addr(file_name, symbol):
             return int("0x" + m.group(1), 16)
     return -1 # ERROR
 
+def read_pointer_value(t, elf_file, symbol_name, symbol_addr=-1):
+    if symbol_addr < 0:
+        symbol_addr = get_symbol_addr(elf_file, symbol_name)
+        if symbol_addr < 0:
+            print("[!] symbol '%s' not found" % symbol_name)
+            return (None, None)
+    symbol = t.read_untyped_memory(symbol_addr, 4)
+    symbol = struct.unpack("<I", symbol)[0]
+    print("\t*%s (addr=%#x) = %#x" % (symbol_name, symbol_addr, symbol))
+    return (symbol_addr, symbol)
+
 REGISTERS = [
     'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11',
     'r12', 'sp', 'lr', 'pc', 'cpsr'
@@ -142,7 +153,7 @@ def do_dump(t, address, size):
     begin = address
     end = address + size
     file_name = 'memory-{begin:x}-{end:x}'.format(begin=begin, end=end)
-    data = t._gdb_interface._gdb.sync_cmd(["-data-read-memory", "0x%x" % address, "x", "4", "1", "%d" % size], "done")['memory'][0]['data']
+    data = t._gdb_interface._gdb.sync_cmd(["-data-read-memory", "0x%x" % address, "x", "4", "1", "%d" % (size / 4)], "done")['memory'][0]['data']
     ret = b''
     for x in data:
         ret += struct.pack('<I', int(x, 16))
@@ -167,7 +178,7 @@ def memory_dump(t, bin_name, areas):
         f.write(json.dumps(dumps))
 
     print("zip name: {}".format(zip_name))
-    zf = zipfile.ZipFile(zip_name, mode='w')
+    zf = zipfile.ZipFile(zip_name, mode='w', compression=zipfile.ZIP_DEFLATED)
     for d in dumps:
         file_name = d[2]
         zf.write(file_name)
@@ -205,12 +216,20 @@ def main():
     e = ava.get_emulator()
 
     print("[+] Running initilization procedures on the target")
+    print("\tEthernet Cable has connected?")
     print("first break point = %#x" % main_addr)
     main_bkt = t.set_breakpoint(main_addr)
     t.cont()
     main_bkt.wait()
 
     print("[+] Target finished initilization procedures")
+    read_pointer_value(t, elf_file, "tcp_active_pcbs")
+    read_pointer_value(t, elf_file, "tcp_listen_pcbs")
+    a, v = read_pointer_value(t, elf_file, "netif_list")
+    a, v = read_pointer_value(t, elf_file, "*netif_list", v)
+    read_pointer_value(t, elf_file, "ram")
+    read_pointer_value(t, elf_file, "ram_end")
+
     print("[+] copying target memory")
     """
     K_atc% nm httpsample.elf| grep dns_table
@@ -218,13 +237,13 @@ def main():
     """
     # ret = t.read_untyped_memory(0x18000000, 0x20000000 - 0x18000000) # TOO SLOW
     try:
-        memory_dump(t, BIN_FILE, [(0x2003ac00, 0x2003ad00 - 0x2003ac00)])
+        memory_dump(t, BIN_FILE, [(0x20030000, 0x20050000 - 0x20030000)]) # < 5 min
         # memory_dump(t, BIN_FILE, [(0x20000000, 0x20a00000 - 0x20000000)]) # SLOW!
     except Exception as e:
         print(e)
         import ipdb; ipdb.set_trace()
 
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
 
     #Further analyses code goes here
     print("[+] analysis phase")
@@ -235,5 +254,5 @@ def main():
 if __name__ == '__main__':
     main()
     print("[*] finished")
-    os.system("kill " + str(os.getpid()))
+    # os.system("kill " + str(os.getpid()))
     exit()

@@ -10,7 +10,9 @@ except ImportError as e:
     print "[!] cannot load emoviz module. missing emoviz.py in current directory. exit."
     exit(1)
 import os, sys, signal
+import importlib
 import pickle, json
+import hashlib
 import zipfile
 import struct
 import hexdump
@@ -31,6 +33,13 @@ angr.manager.l.addHandler(log_handler)
 ### argparse routine
 desc = u'{0} [Args] [Options]\nDetailed options -h or --help'.format(__file__) # error message
 parser = ArgumentParser(description=desc)
+parser.add_argument(
+        '-c', '--config',
+        type=str,          # 受け取る値の型を指定する
+        dest='config', # 保存先変数名
+        required=True,     # 必須項目
+        help='configuration file (target file path, find/avoid, ...)' # --help時に表示する文
+    )
 parser.add_argument(
         '-f', '--start_func',
         type=str,          # 受け取る値の型を指定する
@@ -119,6 +128,14 @@ def signal_handler(signal, frame):
 signal.signal(signal.SIGINT, signal_handler) # Ctrl+C
 ### ==================================================================
 
+def check_file_consistency(file_name, filesum):
+    if filesum:
+        with open(ELF_FILE, 'rb') as f:
+            s = hashlib.md5(f.read()).hexdigest()
+        return s == filesum
+    else:
+        return True
+
 init_memory = {}
 def load_memory_dump(file_name):
     global memory_dump
@@ -148,30 +165,39 @@ def read_memory_dump(addr, size):
             return ret
     raise Exception("unmapped addr, size: %#x, %#x" % (addr, size))
 
-def dump_regs(state, _exit=True):
-    global symvar_listen_pcbs, symbar_netif
-    print "rax = %#x" % state.solver.eval(state.regs.rax)
-    print "rdi = %#x" % state.solver.eval(state.regs.rdi)
-    print "rsp = %#x" % state.solver.eval(state.regs.rsp)
-    print "rbp = %#x" % state.solver.eval(state.regs.rbp)
-    rbp = state.solver.eval(state.regs.rbp)
-    for i in range(0, 0x48, 8):
-        # print "mem[rbp - %#x] = %#x" % (i, state.solver.eval(state.memory.load(rbp - i, 8)))
-        print "mem[rbp - %#x] = %#x" % (i, state.mem[rbp - i].uint64_t.concrete)
-    for i in range(0x20000000, 0x20000000 + 0x200, 8):
-        # v = state.solver.eval(state.memory.load(i, 8))
-        try:
-            v = state.mem[i].uint64_t.concrete
-        except Exception, e:
-            print "mem[%#x]: " % i + str(e)
-            continue
-        if v > 0:
-            print "mem[%#x] = %#x" % (i, v)
-    print "listen_pcbs:"
-    v = state.se.eval(state.se.Reverse(symvar_listen_pcbs), cast_to=str)
-    hexdump.hexdump(v)
-    if _exit:
-        exit()
+# def dump_regs(state, _exit=True):
+#     global symvar_listen_pcbs, symbar_netif
+#     print "rax = %#x" % state.solver.eval(state.regs.rax)
+#     print "rdi = %#x" % state.solver.eval(state.regs.rdi)
+#     print "rsp = %#x" % state.solver.eval(state.regs.rsp)
+#     print "rbp = %#x" % state.solver.eval(state.regs.rbp)
+#     rbp = state.solver.eval(state.regs.rbp)
+#     for i in range(0, 0x48, 8):
+#         # print "mem[rbp - %#x] = %#x" % (i, state.solver.eval(state.memory.load(rbp - i, 8)))
+#         print "mem[rbp - %#x] = %#x" % (i, state.mem[rbp - i].uint64_t.concrete)
+#     for i in range(0x20000000, 0x20000000 + 0x200, 8):
+#         # v = state.solver.eval(state.memory.load(i, 8))
+#         try:
+#             v = state.mem[i].uint64_t.concrete
+#         except Exception, e:
+#             print "mem[%#x]: " % i + str(e)
+#             continue
+#         if v > 0:
+#             print "mem[%#x] = %#x" % (i, v)
+#     print "listen_pcbs:"
+#     v = state.se.eval(state.se.Reverse(symvar_listen_pcbs), cast_to=str)
+#     hexdump.hexdump(v)
+#     if _exit:
+#         exit()
+
+def conv_to_address(_list):
+    ret = []
+    for x in _list:
+        if isinstance(x, int):
+            ret.append(x)
+        elif isinstance(x, str):
+            ret.append(rebased_addr(x))
+    return ret
 
 def memory_dump(state, begin, length):
     ret = ""
@@ -189,6 +215,13 @@ def split_str(str, num):
     if rem:
         ret.append(str[-rem:])
     return ret
+
+def find_symbol(x):
+    global proj
+    sym = proj.loader.find_symbol(x)
+    if sym is None:
+        raise Exception("symbol '%s' is not found" % (x))
+    return sym
 
 def sizeof(symbol_name):
     global info
@@ -215,12 +248,17 @@ def usage():
     print "usage: %s START_FUNC_NAME" % (sys.argv[0])
     exit(1)
 
+
 ### === helper functions ===
-rebased_addr = lambda x: proj.loader.find_symbol(x).rebased_addr
-relative_addr = lambda x: proj.loader.find_symbol(x).relative_addr
+rebased_addr = lambda x: find_symbol(x).rebased_addr
+relative_addr = lambda x: find_symbol(x).relative_addr
 NoReverse = lambda x: x
 BigEndian = lambda x: state.se.Reverse(x)
 LittleEndian = lambda x: x
+
+
+### load configuration
+config = importlib.import_module('config.' + args.config).config
 
 ### analysis start function
 START_FUNC = args.start_func
@@ -241,16 +279,35 @@ DEPTH_FIRST = args.dfs # DFS Option
 CHECK_SEGV = args.check_segv
 
 ### load binary
-ELF_FILE = "./bin/echop-STABLE-1_3_0"
+# ELF_FILE = "./bin/echop-STABLE-1_3_0"
+ELF_FILE = config.elf()
 proj = angr.Project(ELF_FILE, load_options={'auto_load_libs': False})
 start_addr = rebased_addr(START_FUNC)
 print "[*] analysis start: %#x" % start_addr
 
-### create blank state (initial state)
-state = proj.factory.blank_state(addr=start_addr)
 
-## some inspecting
-# import ipdb; ipdb.set_trace()
+### helper boolean
+tcp = (start_addr == rebased_addr('tcp_input'))
+udp = (start_addr == rebased_addr('udp_input')) or (start_addr == rebased_addr('dns_recv'))
+dns = (start_addr == rebased_addr('dns_recv'))
+etharp_arp = (start_addr == rebased_addr('etharp_arp_input'))
+ip = tcp or udp
+
+
+if config.arch == "intel":
+    MY_SYMVAR_REGION_BEGIN = 0x20000000
+elif config.arch == "arm":
+    MY_SYMVAR_REGION_BEGIN = 0x40000000
+MY_SYMVAR_REGION_LENGTH = 0x1000000
+pbuf_ptr = MY_SYMVAR_REGION_BEGIN
+
+### create initial state
+if dns:
+    print "[*] satisfying calling convention for dns"
+    state = proj.factory.call_state(start_addr, 0, 0, pbuf_ptr, 0, 0)
+else:
+    print "[!] unknown initial state"
+    exit(1)
 
 ### add inspecter
 def is_outboud_read_access(state):
@@ -306,8 +363,6 @@ Start              End                Perm  Name
 0x00619000         0x00620000         rw-p  mapped
 0x015ae000         0x015cf000         rw-p  [heap]
 """
-MY_SYMVAR_REGION_BEGIN = 0x20000000
-MY_SYMVAR_REGION_LENGTH = 0x1000000
 state.memory.mem.map_region(MY_SYMVAR_REGION_BEGIN, MY_SYMVAR_REGION_LENGTH, 0b011) # begin, len, permissions(rw-p)
 # MAPPED_BEGIN = 0x00619000
 # MAPPED_LENGTH = 0x3000
@@ -318,12 +373,6 @@ state.options.add("STRICT_PAGE_ACCESS") # to handle SEGV
 state.options.add("REPLACEMENT_SOLVER")
 # import ipdb; ipdb.set_trace()
 
-### helper boolean
-tcp = (start_addr == rebased_addr('tcp_input'))
-udp = (start_addr == rebased_addr('udp_input')) or (start_addr == rebased_addr('dns_recv'))
-dns = (start_addr == rebased_addr('dns_recv'))
-etharp_arp = (start_addr == rebased_addr('etharp_arp_input'))
-ip = tcp or udp
 
 ### load preprocessed data
 print "[*] loading preprocessed data"
@@ -332,28 +381,26 @@ INFO_FILE = ELF_FILE + ".info"
 try:
     with open(INFO_FILE) as f:
         info = pickle.load(f)
+    if hasattr(info, "filesum"):
+        print("[*] checking file consistency...")
+        if check_file_consistency(ELF_FILE, info.filesum) is False:
+            raise Exception("[!] target file is newer than pre-processed one.")
+        print("\tOK")
+    else:
+        print("[!] info file does not have file hash. should preprocess")
+        time.sleep(3) # thinking time
 except IOError as e:
     print e
     print "[!] run `./preprocess.py %s` first" % (ELF_FILE)
-    exit()
+    exit(1)
+
 
 ### load memory dump
 print "[*] loading memory dump"
-# DUMP_FILE = ELF_FILE + ".dump"
-# try:
-#     """
-#     # gdb mem dump version
-#     with open(DUMP_FILE, 'rb') as f:
-#         dump = f.read()
-#     """
-#     with open(DUMP_FILE) as f:
-#         dump = json.load(f)
-# except IOError as e:
-#     print e
-#     print "[!] run `./analysis.py %s %s` first" % (ELF_FILE, START_FUNC)
-#     exit()
-
-DUMP_FILE = ELF_FILE + "-dump.zip"
+if hasattr(config, "dump") and config.dump:
+    DUMP_FILE = config.dump
+else:
+    DUMP_FILE = ELF_FILE + "-dump.zip"
 try:
     load_memory_dump(DUMP_FILE)
 except IOError as e:
@@ -364,15 +411,27 @@ except IOError as e:
 
 ### disables function calls. and sets return value 0
 def handle_ret_0(state):
-    state.regs.rax = 0
+    arch_name = state.arch.name
+    if arch_name == "AMD64":
+        state.regs.rax = 0
+    elif arch_name == "ARMEL":
+        state.regs.r0 = 0
+    else:
+        raise Exception("[!] Unknown Arch name '%s'" % (arch_name))
+
+### ipdb
+def handle_start_ipdb(state):
+    import ipdb; ipdb.set_trace()
 
 ### hooks function calls
 try:
     ### nop function x() calls
     funcs = []
+    if hasattr(config, "skip_funcs"):
+        funcs += config.skip_funcs
+    else:
+        exit(1)
     if dns:
-        # funcs += [
-        # ]
         pass
     else:
         funcs += [
@@ -386,22 +445,45 @@ try:
         "sys_arch_protect", "sys_arch_unprotect", # SYS_ARCH_PROTECT, SYS_ARCH_UNPROTECT
         "sys_arch_sem_wait",
         ]
+    if len(funcs) > 0:
+        print("[*] hooking functions...")
+        if config.arch == "intel":
+            hook_length = 5
+            hook_offset = 0x400000
+        else:
+            hook_length = 4
+            hook_offset = 0
     for func_name in funcs:
         if func_name in info.call:
             for x in info.call[func_name]:
-                proj.hook(0x400000 + x, handle_ret_0, length=5) # 5 bytes instruction
+                print("\thooking %s (reladdr=%#x, size=%#x)" % (func_name, x, hook_length))
+                proj.hook(hook_offset + x, handle_ret_0, length=hook_length)
         else:
             print "[!] info.call has not key '%s'" % func_name
             exit(1)
+        """buggy. not implemented correctly
+        # addr = rebased_addr(func_name)
+        # size = sizeof(func_name)
+        # print("\thooking %s (addr=%#x, size=%#x)" % (func_name, addr, size))
+        # proj.hook(addr, handle_ret_0, length=size)
+        """
+    # for func_name in ["pbuf_copy_partial"]:
+    #     proj.hook(rebased_addr(func_name), handle_start_ipdb, length=sizeof(func_name))
+    if config.arch == "arm": # debug
+        for addr in [0x18010048]:
+            proj.hook(addr, handle_start_ipdb, length=4)
 except Exception as e:
     print e
     import ipdb; ipdb.set_trace()
 
+
 ### enable debug flag
-print "[*] enabling debug_flag"
-LWIP_DBG_ON = 0x80
-LWIP_DBG_OFF = 0x0
-state.mem[rebased_addr('debug_flags')].uint32_t = LWIP_DBG_OFF
+if config.arch == "intel":
+    print "[*] enabling debug_flag"
+    LWIP_DBG_ON = 0x80
+    LWIP_DBG_OFF = 0x0
+    state.mem[rebased_addr('debug_flags')].uint32_t = LWIP_DBG_OFF
+
 
 ### symbolize pbuf
 print "[*] symbolizing pbuf"
@@ -420,15 +502,36 @@ gdb-peda$ x/8wx $rdi
 0x560bea7cbe78 <memp_memory+18968>: 0x00000000  0x00000000  0xea7cbe9e  0x0000560b
 0x560bea7cbe88 <memp_memory+18984>: 0x00300030  0x00010003  0x04030201  0xa6920605 // + 16
 """
-pbuf_ptr = MY_SYMVAR_REGION_BEGIN
-pbuf_next = pbuf_ptr + 0x0
-pbuf_payload_ptr = pbuf_ptr + 0x8
-pbuf_tot_len = pbuf_ptr + 0x10
-pbuf_len = pbuf_ptr + 0x12
-pbuf_type = pbuf_ptr + 0x14
-pbuf_flags = pbuf_ptr + 0x15
-pbuf_ref = pbuf_ptr + 0x16
-pbuf_payload = 0x61f7a2 # pbuf is located in section "mapped"
+if config.arch_bits == 64:
+    pbuf_next = pbuf_ptr + 0x0
+    pbuf_payload_ptr = pbuf_ptr + 0x8
+    pbuf_tot_len = pbuf_ptr + 0x10
+    pbuf_len = pbuf_ptr + 0x12
+    pbuf_type = pbuf_ptr + 0x14
+    pbuf_flags = pbuf_ptr + 0x15
+    pbuf_ref = pbuf_ptr + 0x16
+elif config.arch_bits == 32:
+    """
+    pbuf:
+    2003b8a4 | 00 00 00 00 DE B8 03 20  3E 00 3E 00 00 00 01 00  |  ....... >.>.....
+    pbuf->payload (addr=0x2003b8de):
+    2003b8de | 00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |  ................
+    2003b8ee | 06 67 6F 6F 67 6C 65 03  63 6F 6D 00 00 01 00 01  |  .google.com.....
+    2003b8fe | 03 77 77 77 06 67 6F 6F  67 6C 65 03 63 6F 6D 00  |  .www.google.com.
+    2003b90e | 00 00 00 00 00 00 00 00  00 00 00 00 00 00        |  ..............
+    """
+    pbuf_next = pbuf_ptr + 0
+    pbuf_payload_ptr = pbuf_ptr + 4
+    pbuf_tot_len = pbuf_ptr + 8
+    pbuf_len = pbuf_ptr + 10  # u16_t
+    pbuf_type = pbuf_ptr + 12  # u8_t
+    pbuf_flags = pbuf_ptr + 13  # u8_t
+    pbuf_ref = pbuf_ptr + 14  # u16_t
+if config.arch == "arm":
+    pbuf_payload = 0x2003b8de
+else:
+    pbuf_payload = 0x61f7a2  # pbuf is located in section "mapped" (TODO: arm)
+
 
 state.mem[pbuf_next].qword = 0 # NULL
 state.mem[pbuf_payload_ptr].qword = pbuf_payload # => p->payload == pbuf_payload
@@ -456,8 +559,8 @@ state.memory.store(pbuf_len, state.se.Reverse(symvar_pbuf_len))
 
 ### symbolize pbuf.type
 symvar_pbuf_type = state.se.BVS('pbuf_type', 8)
-# state.add_constraints(symvar_pbuf_type == 0x3)
-state.add_constraints(state.se.Or(symvar_pbuf_type == 0x0, symvar_pbuf_type == 0x3))
+state.add_constraints(symvar_pbuf_type == 0x0)
+# state.add_constraints(state.se.Or(symvar_pbuf_type == 0x0, symvar_pbuf_type == 0x3))
 state.memory.store(pbuf_type, state.se.Reverse(symvar_pbuf_type))
 
 ### symbolize pbuf.ref
@@ -517,25 +620,8 @@ v = state.se.eval(state.se.Reverse(symvar_pbuf_payload), cast_to=str)
 hexdump.hexdump(v[:0x40])
 
 ### load initalized object values
-print "[*] loading memory dump to engine:"
-"""
-# gdb-peda$ dump binary memory echop-STABLE-1_3_0.dump 0x00619000 0x00620000-1
-remainder = len(dump) % 4
-if remainder > 0:
-    dump += b'\0' * (4 - remainder)
-for i, u in enumerate([dump[i:i+4] for i in range(0, len(dump), 4)]):
-    v = struct.unpack('<I', u)[0]
-    state.mem[0x00619000 + i * 4].uint32_t = v
-"""
 print "[*] loading initalized objects to engine:"
-"""
-for objname, objval in dump.items():
-    begin = rebased_addr(objname)
-    print "\tloading %s ... (addr = %#x)" % (objname, begin)
-    for i, v in enumerate(objval):
-        state.mem[begin + i * 4].uint32_t = v
-"""
-for objname in ["dns_table"]:
+for objname in config.init_objs:
     begin = rebased_addr(objname)
     print "\tloading %s ... (addr = %#x)" % (objname, begin)
     objval = read_memory_dump(begin, sizeof(objname))
@@ -543,60 +629,11 @@ for objname in ["dns_table"]:
         v = struct.unpack('<I', sv)[0]
         state.mem[begin + i * 4].uint32_t = v
 
+#### check if initialized correctry
 v = state.se.eval(state.memory.load(rebased_addr("dns_table"), 0x120), cast_to=str)
 hexdump.hexdump(v)
 # import ipdb; ipdb.set_trace()
 # exit()
-
-### ===== Do not delete me ===========================================
-### Or you correct modles cannot be obtained
-### symbolize tcp/udp pcbs
-# print "[*] symbolizing tcp/udp pcbs"
-# listen_pcbs = MY_SYMVAR_REGION_BEGIN + 0x10000
-# callback_arg = listen_pcbs + sizeof("tcp_listen_pcbs")
-# state.mem[rebased_addr('tcp_listen_pcbs')].uint64_t = listen_pcbs
-# state.mem[callback_arg + 0].uint32_t = 0x00000010
-# state.mem[callback_arg + 4].uint32_t = 0x00000002
-# symvar_listen_pcbs = state.se.BVS('listen_pcbs', 56 * 8)
-# symvar_listen_pcbs_state = state.se.BVS('listen_pcbs', 4 * 8)
-# state.memory.store(listen_pcbs, state.se.Reverse(symvar_listen_pcbs))
-
-# ### symbolize tcp_active_pcbs
-# print "[*] symbolizing tcp_active_pcbs"
-# pcb = MY_SYMVAR_REGION_BEGIN + 0x16000
-# state.mem[rebased_addr('tcp_active_pcbs')].uint64_t = pcb
-# # state.mem[rebased_addr('tcp_active_pcbs') + 8].uint64_t = 0 # terminate with NULL
-# state.mem[rebased_addr('udp_pcbs')].uint64_t = pcb
-# symvar_pcb = state.se.BVS('pcb', 0xe0 * 8)
-# if tcp:
-#     pass
-# elif udp:
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pcb)) == 0x0) # remote ip
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pcb)) == 0xff000000) # so_options, tos, ttl
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pcb)) == 0x0) # padding?
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 24 - 1, 8 * 16, symvar_pcb)) == 0) # next
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 26 - 1, 8 * 24, symvar_pcb)) == 0x7) # local_port
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 28 - 1, 8 * 26, symvar_pcb)) == 0x0) # remote_port
-#     state.add_constraints(NoReverse(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pcb)) == 0x0) # padding?
-#     pass
-# state.memory.store(pcb, state.se.Reverse(symvar_pcb))
-### ===== end of Do not delete me ====================================
-
-### symbolize function call arguments
-if dns:
-    print "[*] satisfying calling convention for dns"
-    """
-    static void    dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, ip_addr_t *addr, u16_t port)
-    LWIP_UNUSED_ARG(arg);
-    LWIP_UNUSED_ARG(pcb);
-    LWIP_UNUSED_ARG(addr);
-    LWIP_UNUSED_ARG(port);
-    """
-    state.regs.rdi = 0        # arg (UNUSED)
-    state.regs.rsi = 0        # pcb (UNUSED)
-    state.regs.rdx = pbuf_ptr # pbuf
-    state.regs.rcx = 0        # addr (UNUSED)
-    state.regs.r8 = 0         # port (UNUSED)
 
 
 ### load initial state to engine (Simulation Manager)
@@ -614,11 +651,8 @@ elif DEPTH_FIRST:
 else:
     print "[*] Default exploration mode"
 
-### setup avoids
-find, avoid = [], []
-### pbuf_free() means return of dns_recv()
-avoid += [rebased_addr('dns_found')]
-avoid += [rebased_addr('pbuf_free')]
+### setup find/avoid
+find, avoid = conv_to_address(config.find), conv_to_address(config.avoid)
 
 ### print finds / avoids
 print "[*] find = %s" % str(map(lambda x: hex(x), find))
@@ -635,6 +669,13 @@ def step_func(lpg):
             lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
         lpg.stash(filter_func=lambda path: path.addr in avoid, from_stash='active', to_stash='avoid')
 
+    for s in lpg.errored:
+        if 'Unsupported CCall' in s.error.message:  # ex) 'Unsupported CCall armg_calculate_flags_nzcv'
+            print("[!] Unhandled error: " + s.error.message)
+            # import ipdb; ipdb.set_trace()
+            plot_trace()
+            exit(1)
+
     lpg.drop(stash='avoid') # memory usage optimization
 
     # if THREADING:
@@ -650,12 +691,13 @@ def step_func(lpg):
 def until_func(lpg):
     if len(lpg.errored) > 0:
         return True
-    if len(lpg.active) == 0:
+    if len(lpg.active) == 0: # No Meaning
         print "[*] out of active stashes"
         if hasattr('threadlocal', lpg):
             return len(lpg.threadlocal) == 0
         if hasattr('deferred', lpg):
             return len(lpg.deferred) == 0
+
 
 ### explore bugs
 time.sleep(5)
@@ -738,82 +780,33 @@ if IS_ROOT and PACKET_NO == -1:
 ### ==================================================================
 """)
     ###
-    num_founds = len(simgr.found)
-    for i, found in enumerate(simgr.found):
-        print "found #%d: stdout:\n%s" % (i, found.posix.dumps(1))
-        print "found #%d: stderr:\n%r" % (i, found.posix.dumps(2))
-        v = found.se.eval(symvar_pbuf_tot_len)
-        print "found #%d: pbuf.tot_len: %#x (%d)" % (i, v, v)
-        v = found.se.eval(symvar_pbuf_len)
-        print "found #%d: pbuf.len: %#x (%d)" % (i, v, v)
-        l2_payload_len = v
-        v = found.se.eval(symvar_pbuf_type)
-        print "found #%d: pbuf.type: %#x (%d)" % (i, v, v)
-        v = found.se.eval(symvar_pbuf_ref)
-        print "found #%d: pbuf.ref: %#x (%d)" % (i, v, v)
-        print "found #%d: pbuf.payload (= L2 Payload): " % (i)
-        v = found.se.eval(found.memory.load(pbuf_payload, L2_PAYLOAD_MAX_LEN), cast_to=str)[:l2_payload_len]
-        hexdump.hexdump(v[:l2_payload_len])
-        anrrs = ord(v[6]) * 0x100 + ord(v[7])
-        print "found #{:d}: DNS: Answer RRs: (0x{:#x}) %d".format(i, anrrs)
-        result.write("""\n
-### this is Packet #{no:d}
-print("[*] ==== [Packet #{no:d}] ====")
-print("found #{no:d}: pbuf.payload:")
-l2_payload_len = {len:}
-v = pickle.loads({dump!r})
-if {ip!r}: # is IP packet?
-    p = IP(_pkt=v[:l2_payload_len])
-elif {etharp!r}: # is Ether packet?
-    p = Ether(_pkt=v[:l2_payload_len])
-
-recalc_chksums(p)
-try:
-    p.show2()
-except Exception as e:
-    print(e)
-    print("p.show() errored.")
-b = bytes(p)[:l2_payload_len] # trim unused padding
-
-if IS_ROOT and PACKET_NO == {no:d}: # send mode
-    ### write your script here...
-    ### send(p) trims padding automically, so I use this one
-    if {ip!r}:
-        sendp(Ether(dst="11:45:14:11:45:14", type=eth_type(p))/b, iface="tap0")
-    if {etharp!r}:
-        sendp(b, iface="tap0")
-else: # preview mode
-    ### write your script here...
-    hexdump(b)
-    pass
-""".format(no=i, dump=pickle.dumps(v), len=l2_payload_len, ip=ip, etharp=etharp_arp))
-        print "found #%d: pbuf:" % (i)
-        v = memory_dump(found, pbuf_ptr, 0x20)
-        hexdump.hexdump(v)
-    ###
-    for i, errored in enumerate(simgr.errored):
-        se = errored.state.plugins['solver_engine']
-        posix = errored.state.plugins['posix']
-        memory = errored.state.plugins['memory']
-        print "errored #%d: error.reason: %s" % (i, errored.error.reason)
-        print "errored #%d: error.addr: %#x" % (i, errored.error.addr)
-        print "errored #%d: error.ins_addr: %#x" % (i, errored.error.ins_addr)
-        print "errored #%d: stdout:\n%s" % (i, posix.dumps(1))
-        print "errored #%d: stderr:\n%r" % (i, posix.dumps(2))
-        payload_len = se.eval(symvar_pbuf_tot_len)
-        print "errored #{0:d}: pbuf->tot_len: {1:#x} ({1:d})".format(i, payload_len)
-        v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)
-        # v = se.eval(memory.load(pbuf_payload, L2_PAYLOAD_MAX_LEN), cast_to=str)
-        print "errored #%d: pbuf->payload:" % (i)
-        hexdump.hexdump(v[:payload_len])
-        anrrs = ord(v[6]) * 0x100 + ord(v[7])
-        print "errored #{0:d}: DNS: Answer RRs: ({1:#x}) {1:d}".format(i, anrrs)
-        result.write("""\n
+    try:
+        num_founds = len(simgr.found)
+        for i, found in enumerate(simgr.found):
+            print "found #%d: pc: %#x" % (i, found.addr)
+            print "found #%d: stdout:\n%s" % (i, found.posix.dumps(1))
+            print "found #%d: stderr:\n%r" % (i, found.posix.dumps(2))
+            v = found.se.eval(symvar_pbuf_tot_len)
+            print "found #%d: pbuf.tot_len: %#x (%d)" % (i, v, v)
+            v = found.se.eval(symvar_pbuf_len)
+            print "found #%d: pbuf.len: %#x (%d)" % (i, v, v)
+            l2_payload_len = v
+            v = found.se.eval(symvar_pbuf_type)
+            print "found #%d: pbuf.type: %#x (%d)" % (i, v, v)
+            v = found.se.eval(symvar_pbuf_ref)
+            print "found #%d: pbuf.ref: %#x (%d)" % (i, v, v)
+            print "found #%d: pbuf.payload (= L2 Payload): " % (i)
+            v = found.se.eval(found.memory.load(pbuf_payload, L2_PAYLOAD_MAX_LEN), cast_to=str)[:l2_payload_len]
+            hexdump.hexdump(v[:l2_payload_len])
+            if dns:
+                anrrs = ord(v[6]) * 0x100 + ord(v[7])
+                print "found #{0:d}: DNS: Answer RRs: {1:d} ({1:#x})".format(i, anrrs)
+            result.write("""\n
 ### this is Packet #{no:d}
 print("[*] ==== [Packet #{no:d}] ====")
 print("found #{no:d}: pbuf.payload:")
 payload_len = {len:}
-v = pickle.loads({dump!r})
+v = pickle.loads(b{dump!r})
 v = v[:payload_len] # trim unused payload
 # p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/{layer!s}(_pkt=v) # FIXME: dport must be corrected
 p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/Raw(v) # FIXME: dport must be corrected
@@ -828,7 +821,59 @@ b = bytes(p)[:payload_len]
 
 if IS_ROOT and PACKET_NO == {no:d}: # send mode
     ### write your script here...
-    ### send(p) trims padding automically, so I use this one
+    ### send(p) trims padding automatically, so I use this one
+    if {ip!r}:
+        # sendp(Ether(dst="11:45:14:11:45:14", type=eth_type(p))/b, iface="tap0")
+        send(p)
+else: # preview mode
+    ### write your script here...
+    hexdump(b)
+    pass
+""".format(no=i, dump=pickle.dumps(v), len=l2_payload_len, ip=ip, etharp=etharp_arp, layer="DNS"))
+            print "found #%d: pbuf:" % (i)
+            v = memory_dump(found, pbuf_ptr, 0x20)
+            hexdump.hexdump(v)
+    ###
+        for i, errored in enumerate(simgr.errored):
+            se = errored.state.plugins['solver_engine']
+            posix = errored.state.plugins['posix']
+            memory = errored.state.plugins['memory']
+            print "errored #%d: error.reason: %s" % (i, errored.error.reason)
+            print "errored #%d: error.addr: %#x" % (i, errored.error.addr)
+            print "errored #%d: error.ins_addr: %#x" % (i, errored.error.ins_addr)
+            print "errored #%d: stdout:\n%s" % (i, posix.dumps(1))
+            print "errored #%d: stderr:\n%r" % (i, posix.dumps(2))
+            payload_len = se.eval(symvar_pbuf_tot_len)
+            print "errored #{0:d}: pbuf->tot_len: {1:#x} ({1:d})".format(i, payload_len)
+            v = se.eval(se.Reverse(symvar_pbuf_payload), cast_to=str)
+            # v = se.eval(memory.load(pbuf_payload, L2_PAYLOAD_MAX_LEN), cast_to=str)
+            print "errored #%d: pbuf->payload:" % (i)
+            hexdump.hexdump(v[:payload_len])
+            if dns:
+                anrrs = ord(v[6]) * 0x100 + ord(v[7])
+                print "errored #{0:d}: DNS: Answer RRs: ({1:#x}) {1:d}".format(i, anrrs)
+            result.write("""\n
+### this is Packet #{no:d}
+print("[*] ==== [Packet #{no:d}] ====")
+print("found #{no:d}: pbuf.payload:")
+payload_len = {len:}
+v = pickle.loads(b{dump!r})
+# v = bytes(v, encoding='ascii')
+v = v[:payload_len] # trim unused payload
+# p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/{layer!s}(_pkt=v) # FIXME: dport must be corrected
+p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/Raw(v) # FIXME: dport must be corrected
+
+recalc_chksums(p)
+try:
+    p.show2()
+except Exception as e:
+    print(e)
+    print("p.show() errored.")
+b = bytes(p)[:payload_len]
+
+if IS_ROOT and PACKET_NO == {no:d}: # send mode
+    ### write your script here...
+    ### send(p) trims padding automatically, so I use this one
     if {ip!r}:
         # sendp(Ether(dst="11:45:14:11:45:14", type=eth_type(p))/b, iface="tap0")
         send(p)
@@ -837,11 +882,18 @@ else: # preview mode
     hexdump(b)
     pass
 """.format(no=(i + num_founds), dump=pickle.dumps(v), len=payload_len, ip=ip, layer="DNS"))
+    except Exception as e:
+        print e
+        result.close()
+        sys.stdout = fout # re-enable stdout
+        ftxt.close()
+        import ipdb; ipdb.set_trace()
+
     ### the end of iteration
     result.close()
     print ""
     print "[*] attack packets are saved to %s." % (RESULT_PY)
-else:
+else: # if FOUND_RESULT
     print "[!] no outcomes;("
     if len(simgr.avoid) > 0 or len(simgr.deadended) > 0:
         plot_trace()

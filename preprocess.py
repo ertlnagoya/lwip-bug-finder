@@ -2,6 +2,8 @@
 import os, sys
 from subprocess import *
 import pickle
+import struct
+import hashlib
 
 ELF_FILE = None
 OBJDUMP_FILE = None
@@ -10,6 +12,17 @@ PY_OBJ_FILE = None
 def usage():
     print "usage: %s ELF_FILE" % (sys.argv[0])
     exit(1)
+
+def arch(ELF_FILE):
+    b = b''
+    with open(ELF_FILE, 'rb') as f:
+        b = f.read(32)
+    assert(len(b) > 0)
+    e_machine = struct.unpack('<H', b[0x12:0x14])[0]
+    if e_machine in [3, 50]:
+        return "intel"
+    if e_machine == 40:
+        return "arm"
 
 def caller_addr_list(inst_name, func_name):
     global OBJDUMP_FILE
@@ -27,12 +40,13 @@ class Symbol():
         self.size = size
 
 class Info():
-    def __init__(self, symbols, disasm=None, jmp=None, call=None):
+    def __init__(self, symbols, disasm=None, jmp=None, call=None, filesum=None):
         assert(symbols is not None)
         self.symbols = symbols
         self.disasm = disasm
         self.jmp = jmp
         self.call = call
+        self.filesum = filesum
 
 def main(argc, argv):
     global ELF_FILE, OBJDUMP_FILE, PY_OBJ_FILE
@@ -41,22 +55,31 @@ def main(argc, argv):
         usage()
 
     ELF_FILE = argv[1]
+    if not os.path.exists(ELF_FILE):
+        print("[!] File '%s' not exists" % (ELF_FILE))
+        exit(1)
+    ARCH = arch(ELF_FILE)
     SYMS_FILE = ELF_FILE + ".syms"
+    if ARCH == "intel":
+        OBJDUMP = "objdump"
+    else:
+        OBJDUMP = "%s-none-eabi-objdump" % (ARCH)
     OBJDUMP_FILE = ELF_FILE + ".objdump"
     INFO_FILE = ELF_FILE + ".info"
 
+    ### debug option
     if argc > 2 and argv[2] == "l":
         with open(INFO_FILE) as f:
             info = pickle.load(f)
             import ipdb; ipdb.set_trace()
 
-    ### symbols
+    print("""obtain symbols""")
     err = os.system("nm --print-size %s > %s" % (ELF_FILE, SYMS_FILE))
     if err:
         print "[!] dumping symbols error!"
         exit(1)
 
-    ### translate symbols file to symbols object
+    print("""translate symbols file to symbols object""")
     symbols = {}
     with open(SYMS_FILE) as f:
         for x in f.readlines():
@@ -73,18 +96,25 @@ def main(argc, argv):
             except Exception:
                 import ipdb; ipdb.set_trace()
 
-    ### objdump
-    err = os.system("objdump -d %s > %s" % (ELF_FILE, OBJDUMP_FILE))
+    print("""objdump""")
+    err = os.system("%s -d %s > %s" % (OBJDUMP, ELF_FILE, OBJDUMP_FILE))
     if err:
         print "[!] objdump error!"
         exit(1)
 
-    ### obtain function callers
+    print("""obtain function callers""")
     call = {}
     for x in symbols.keys():
-        call[x] = caller_addr_list("call", x)
+        if ARCH == "intel":
+            inst_name = "call"
+        elif ARCH == "arm":
+            inst_name = "bl"
+        else:
+            print("[!] unkown arch. exit")
+            exit(1)
+        call[x] = caller_addr_list(inst_name, x)
 
-    ### disassembly
+    print("""disassembly""")
     disasm = {}
     with open(OBJDUMP_FILE) as f:
         for x in f.readlines():
@@ -100,8 +130,12 @@ def main(argc, argv):
                         pass
                     disasm[int(addr, 16)] = asm
 
-    ### dump variables
-    info = Info(symbols=symbols, disasm=disasm, call=call)
+    print("""file hash""")
+    with open(ELF_FILE, 'rb') as f:
+        filesum = hashlib.md5(f.read()).hexdigest()
+
+    print("""save result""")
+    info = Info(symbols=symbols, disasm=disasm, call=call, filesum=filesum)
     with open(INFO_FILE, "w") as f:
         pickle.dump(info, f)
 

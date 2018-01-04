@@ -3,6 +3,7 @@ import sys
 import r2pipe
 
 def usage():
+    print("Dipendency analyzer")
     print("usage: {} BIN START_FUNCTION".format(sys.argv[0]))
     print("\tBIN is analysis target")
     print("\tSTART_FUNCTION is a function to start symbolic exection")
@@ -34,10 +35,29 @@ def add_calle(cfg, func):
                     calee.add(f)
                     add_calle(cfg, f) # add callee functions of f
 
+### dependent functions
 add_calle(cfg, START_FUNC)
 print(calee)
 
-###
+ret = r2.cmdj("aflj")
+symbols_lookup_table = {}
+for x in ret:
+    if 'name' in x:
+        if x['name'] in calee:
+            offset = x['offset']
+            size = x['size']
+            symbols_lookup_table[(offset, offset + size)] = x['name']
+# print(symbols_lookup_table)
+
+### dependent objects
+def translate(addr):
+    global symbols_lookup_table
+    for x in symbols_lookup_table.keys():
+        begin, end = x
+        if begin <= addr and addr < end:
+            return symbols_lookup_table[x]
+    return None
+
 dependent_objs = set()
 res = r2.cmd("ax | grep 'data mem'")
 for x in res.split('\n'):
@@ -50,9 +70,11 @@ for x in res.split('\n'):
     # if 'obj.' in ref_from:
     if True:
         for y in calee:
-            if y in ref_to:
+            ref_to_addr = int(ref_to.split(' ')[0], 16)
+            if y in ref_to or (y == translate(ref_to_addr)):
                 objname = ref_from.split(' ')[0]
                 dependent_objs.add(objname)
+                # dependent_objs.add(ref_from)
 print(dependent_objs)
 
 ### gather dependent symbols information
@@ -60,43 +82,48 @@ symbols = {}
 isj_ret = r2.cmdj("isj")
 for x in isj_ret:
     flagname = x['flagname']
-    if flagname in calee or flagname in dependent_objs:
+    # if flagname in calee or flagname in dependent_objs:
+    if flagname in dependent_objs:
         symbols[flagname] = x
 # print(symbols)
 
-fdump = open("fetch-memory.py", "w")
-fdump.write("""### NOTE: THIS IS A GENERATED SCRIPT BY analyze.py
-### NOTE: run this script in gdb, NOT shell.
-import gdb
-import json
+# for x in symbols.values():
+#     print("%s\t%#x" % (x['flagname'], x['vaddr']))
 
-def do_dump(addr, size):
-    if size % 4:
-        size += 4 - (size % 4)
-    addr = '\\'' + addr + '\\''
-    if not addr.isdigit():
-        addr = '&' + addr
-    o = gdb.execute('x/{size:d}wx {addr!s}'.format(addr=addr, size=int(size / 4)), to_string=True)
-    o = o.strip()
-    vals = []
-    for x in o.split('\\n'):
-        v = x.split(':')[1].strip().split('\t')
-        for y in v:
-            vals.append(int(y, 16))
-    return vals
 
-dump = {}
-""")
-for x in dependent_objs:
-    name = symbols[x]['name']
-    addr = symbols[x]['name']
-    size = symbols[x]['size']
-    fdump.write("dump['{name}'] = do_dump('{addr}', {size})\n".format(name=name, addr=addr, size=size))
-fdump.write("""
-print(dump)
+# fdump = open("fetch-memory.py", "w")
+# fdump.write("""### NOTE: THIS IS A GENERATED SCRIPT BY analyze.py
+# ### NOTE: run this script in gdb, NOT shell.
+# import gdb
+# import json
 
-with open("{dump_name}.dump", "w") as f:
-    json.dump(dump, f)
-print('[*] memory dump done! Go on your analysis!')
-""".format(dump_name=BIN))
-fdump.close()
+# def do_dump(addr, size):
+#     if size % 4:
+#         size += 4 - (size % 4)
+#     addr = '\\'' + addr + '\\''
+#     if not addr.isdigit():
+#         addr = '&' + addr
+#     o = gdb.execute('x/{size:d}wx {addr!s}'.format(addr=addr, size=int(size / 4)), to_string=True)
+#     o = o.strip()
+#     vals = []
+#     for x in o.split('\\n'):
+#         v = x.split(':')[1].strip().split('\t')
+#         for y in v:
+#             vals.append(int(y, 16))
+#     return vals
+
+# dump = {}
+# """)
+# for x in dependent_objs:
+#     name = symbols[x]['name']
+#     addr = symbols[x]['name']
+#     size = symbols[x]['size']
+#     fdump.write("dump['{name}'] = do_dump('{addr}', {size})\n".format(name=name, addr=addr, size=size))
+# fdump.write("""
+# print(dump)
+
+# with open("{dump_name}.dump", "w") as f:
+#     json.dump(dump, f)
+# print('[*] memory dump done! Go on your analysis!')
+# """.format(dump_name=BIN))
+# fdump.close()

@@ -1,0 +1,57 @@
+diff --git a/mbed-lib/EthernetInterface/lwip/include/lwip/opt.h b/mbed-lib/EthernetInterface/lwip/include/lwip/opt.h
+index a1b8765..02ea831 100644
+--- a/mbed-lib/EthernetInterface/lwip/include/lwip/opt.h
++++ b/mbed-lib/EthernetInterface/lwip/include/lwip/opt.h
+@@ -1868,7 +1868,7 @@
+  * IP_DEBUG: Enable debugging for IP.
+  */
+ #ifndef IP_DEBUG
+-#define IP_DEBUG                        LWIP_DBG_OFF
++#define IP_DEBUG                        LWIP_DBG_ON
+ #endif
+ 
+ /**
+@@ -1917,7 +1917,7 @@
+  * TCP_DEBUG: Enable debugging for TCP.
+  */
+ #ifndef TCP_DEBUG
+-#define TCP_DEBUG                       LWIP_DBG_OFF
++#define TCP_DEBUG                       LWIP_DBG_ON
+ #endif
+ 
+ /**
+@@ -1960,7 +1960,7 @@
+  * TCP_OUTPUT_DEBUG: Enable debugging in tcp_out.c output functions.
+  */
+ #ifndef TCP_OUTPUT_DEBUG
+-#define TCP_OUTPUT_DEBUG                LWIP_DBG_OFF
++#define TCP_OUTPUT_DEBUG                LWIP_DBG_ON
+ #endif
+ 
+ /**
+@@ -1981,14 +1981,14 @@
+  * UDP_DEBUG: Enable debugging in UDP.
+  */
+ #ifndef UDP_DEBUG
+-#define UDP_DEBUG                       LWIP_DBG_OFF
++#define UDP_DEBUG                       LWIP_DBG_ON
+ #endif
+ 
+ /**
+  * TCPIP_DEBUG: Enable debugging in tcpip.c.
+  */
+ #ifndef TCPIP_DEBUG
+-#define TCPIP_DEBUG                     LWIP_DBG_OFF
++#define TCPIP_DEBUG                     LWIP_DBG_ON
+ #endif
+ 
+ /**
+@@ -2037,7 +2037,7 @@
+  * DNS_DEBUG: Enable debugging for DNS.
+  */
+ #ifndef DNS_DEBUG
+-#define DNS_DEBUG                       LWIP_DBG_OFF
++#define DNS_DEBUG                       LWIP_DBG_ON
+ #endif
+ 
+ #endif /* __LWIP_OPT_H__ */
