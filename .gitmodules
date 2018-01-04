@@ -1,9 +1,12 @@
 [submodule "lwip"]
 	path = lwip
 	url = https://git.savannah.nongnu.org/git/lwip.git
+    ignore = all    
 [submodule "lwip-contrib"]
-	path = lwip-contrib
-	url = git://git.savannah.gnu.org/lwip/lwip-contrib.git
+    path = lwip-contrib
+    url = git://git.savannah.gnu.org/lwip/lwip-contrib.git
+    ignore = all    
 [submodule "asp-gr_peach_gcc-mbed"]
-	path = asp-gr_peach_gcc-mbed
-	url = https://github.com/ncesnagoya/asp-gr_peach_gcc-mbed.git
+    path = asp-gr_peach_gcc-mbed
+    url = https://github.com/ncesnagoya/asp-gr_peach_gcc-mbed.git
+    ignore = all    
