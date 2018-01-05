@@ -299,36 +299,40 @@ else:
     exit(1)
 
 
-### add inspecter
-def outboud_access_constriant(state, read_addr):
+### add inspector
+def outbound_access_constriant(state, read_addr):
     arch_name = state.arch.name
     if arch_name == "AMD64":
         return state.solver.And(
-            read_addr > 0x00620000,
+            read_addr > 0x00620000, # pbuf->payload: 0x61f7a2
             read_addr < 0x015ae000,
             )
     elif arch_name == "ARMEL": # Not Good Idea (there're no segv in mbed)
         return state.solver.And(
-            read_addr > 0x2003b900, # pbuf->payload: 0x2003b8de
-            read_addr < 0x20040000,
+            read_addr > 0x2003d000, # pbuf->payload: 0x2003b8de
+            read_addr < 0x20080000,
             )
+    else:
+        raise Exception("Unhandled arch_name")
 
-def is_outboud_read_access(state):
+def is_outbound_read_access(state):
     read_addr = state.inspect.mem_read_address
-    return state.solver.satisfiable(extra_constraints=[outboud_access_constriant(state, read_addr)])
+    return state.solver.satisfiable(extra_constraints=[outbound_access_constriant(state, read_addr)])
 
+segv_found = False
 def check_segv(state):
-    global simgr
-    # if state.addr not in [0x404aac]: ### short-cut for debuging
-    #     return
-    print '>> Read', repr(state.inspect.mem_read_expr)[:240], 'from', repr(state.inspect.mem_read_address)[:240]
+    global simgr, segv_found
+    if segv_found:
+        return
     read_addr = state.inspect.mem_read_address
     if not hasattr(read_addr, 'symbolic'):
         return
     if read_addr.symbolic:
-        print "[*] satisfiable: %s" % repr(is_outboud_read_access(state))
-        if is_outboud_read_access(state):
+        print '>> Read', repr(state.inspect.mem_read_expr)[:240], 'from', repr(state.inspect.mem_read_address)[:240]
+        print "[*] satisfiable: %s" % repr(is_outbound_read_access(state))
+        if is_outbound_read_access(state):
             try:
+                segv_found = True
                 print "[*] found memory access violation"
                 # state.add_constraints(state.solver.And(
                 # read_addr > 0x00620000,
@@ -338,8 +342,9 @@ def check_segv(state):
                 payload_len = state.solver.eval(symvar_pbuf_tot_len)
                 v = state.solver.eval(state.solver.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
                 hexdump.hexdump(v)
+                simgr.found.append(state)
                 for active in simgr.active:
-                    active.add_constraints(outboud_access_constriant(active, read_addr))
+                    active.add_constraints(outbound_access_constriant(active, read_addr))
                 # import ipdb; ipdb.set_trace()
             except Exception as e:
                 print "[!] Exception: ", e
@@ -688,8 +693,8 @@ def step_func(lpg):
     for s in lpg.errored:
         if 'Unsupported CCall' in s.error.message:  # ex) 'Unsupported CCall armg_calculate_flags_nzcv'
             print("[!] Unhandled error: " + s.error.message)
-            # import ipdb; ipdb.set_trace()
-            plot_trace()
+            import ipdb; ipdb.set_trace()
+            # plot_trace()
             exit(1)
 
     lpg.drop(stash='avoid') # memory usage optimization
@@ -740,7 +745,7 @@ if FOUND_RESULT:
 
     if dns:
         layer = "DNS"
-    if tcp or udp:
+    elif tcp or udp:
         layer = "IP"
     else:
         layer = "Raw"
@@ -865,7 +870,7 @@ else: # preview mode
     ### write your script here...
     hexdump(b)
     pass
-""".format(no=i, dump=pickle.dumps(v), len=l2_payload_len, ip=ip, etharp=etharp_arp, layer=layer))
+""".format(no=i, dump=pickle.dumps(v), len=l2_payload_len, layer=layer))
             print "found #%d: pbuf:" % (i)
             v = memory_dump(found, pbuf_ptr, 0x20)
             hexdump.hexdump(v)
@@ -910,20 +915,21 @@ b = bytes(p)[:payload_len]
 if IS_ROOT and PACKET_NO == {no:d}: # send mode
     ### write your script here...
     ### send(p) trims padding automatically, so I use this one
-    if {ip!r}:
-        sendp(Ether(dst="00:02:f7:f0:00:00", type=eth_type(p))/b, iface=IFACE)
-    if {dns!r}:
-        send(p)
+    sendp(Ether(dst="00:02:f7:f0:00:00", type=eth_type(p))/b, iface=IFACE)
+    send(p)
 else: # preview mode
     ### write your script here...
     hexdump(b)
     pass
-""".format(no=(i + num_founds), dump=pickle.dumps(v), len=payload_len, ip=ip, layer="DNS"))
+""".format(no=(i + num_founds), dump=pickle.dumps(v), len=payload_len, layer="DNS"))
     except Exception as e:
         result.close()
         sys.stdout = fout # re-enable stdout
         ftxt.close()
+        ###
+        print "[!] Exception Occurred:"
         print e
+        print "'type c<Enter>' to continue"
         import ipdb; ipdb.set_trace()
 
     ### the end of iteration
