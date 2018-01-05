@@ -26,6 +26,9 @@ class emoviz():
         self.proj = proj
         self.disasm = disasm
 
+        self.transition_addrs = []
+        self.transition_offsets = []
+
     def __del__(self):
         self.trace = {}
 
@@ -80,11 +83,14 @@ class emoviz():
                 if err:
                     self.create_node(label=x, description=x)
                 else:
+                    self.transition_addrs.append(pc)
                     describe_addr = self.proj.loader.describe_addr(pc)
                     if "(offset" in describe_addr:
                         func = describe_addr.split()[0]
                         func = cxxfilt.demangle(func)
+                        offset = describe_addr.split()[2].replace(')', '')
                         describe_addr = ' '.join([func] + describe_addr.split()[1:])
+                        self.transition_offsets.append(offset)
                     fillcolor = "transparent"
                     if describe_addr.startswith("_start"):
                         fillcolor = "gray"
@@ -132,3 +138,9 @@ class emoviz():
         png_file, _ = os.path.splitext(dot_file)
         png_file += ".png"
         os.system("dot -Tpng " + dot_file + " -o " + png_file)
+
+    def save_transitions(self, path):
+        with open(path + '_addrs.log', 'w') as f:
+            f.write('\n'.join([hex(x) for x in self.transition_addrs]))
+        with open(path + '_offsets.log', 'w') as f:
+            f.write('\n'.join(self.transition_offsets))

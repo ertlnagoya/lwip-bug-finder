@@ -69,56 +69,56 @@ args = parser.parse_args()
 ### ==================================================================
 TRACE_SAVE_DIR = "./trace/"
 os.system("if [ ! -d %s ]; then mkdir %s; fi" % (TRACE_SAVE_DIR, TRACE_SAVE_DIR))
-os.system("rm -f %s[a-zA-Z]*-[0-9]*.{png,dot,txt}" % (TRACE_SAVE_DIR))
+os.system("rm -f %s[a-zA-Z]*-[0-9]*.{png,dot,txt,log}" % (TRACE_SAVE_DIR))
 def plot_trace():
     global proj, state
 
-    def helper(proj, state, dot_file, plain_file=""):
+    def helper(proj, state, dot_file, transition_file, plain_file=""):
         ev = emoviz.emoviz(proj)
         ev.add(state)
         ev.save_dot(dot_file)
         ev.save_png(dot_file)
+        ev.save_transitions(transition_file)
         if plain_file:
             ev.save_plain(plain_file)
 
     for (i, act) in enumerate(simgr.active):
         dot_file = TRACE_SAVE_DIR + "active-%d.dot" % i
-        helper(proj, act.state, dot_file,
+        transition_file = TRACE_SAVE_DIR + "transition_active-%d" % i
+        helper(proj, act.state, dot_file, transition_file
             # plain_file=TRACE_SAVE_DIR + "active-%d.txt" % i
             )
         if i >= 15: break
     if hasattr(simgr, "found"):
         for (i, fnd) in enumerate(simgr.found):
             dot_file = TRACE_SAVE_DIR + "found-%d.dot" % i
-            helper(proj, fnd.state, dot_file)
+            transition_file = TRACE_SAVE_DIR + "transition_found-%d" % i
+            helper(proj, fnd.state, dot_file, transition_file)
     if hasattr(simgr, "avoid"):
         for (i, avd) in enumerate(simgr.avoid):
             dot_file = TRACE_SAVE_DIR + "avoid-%d.dot" % i
-            helper(proj, avd.state, dot_file,
-                # plain_file=TRACE_SAVE_DIR + "avoid-%d.txt" % i
-                )
-            if i > 5: break
-    if hasattr(simgr, "threadlocal"):
-        for (i, x) in enumerate(simgr.threadlocal):
-            dot_file = TRACE_SAVE_DIR + "threadlocal-%d.dot" % i
-            helper(proj, x.state, dot_file,
+            transition_file = TRACE_SAVE_DIR + "transition_avoid-%d" % i
+            helper(proj, avd.state, dot_file, transition_file
                 # plain_file=TRACE_SAVE_DIR + "avoid-%d.txt" % i
                 )
             if i > 5: break
     if hasattr(simgr, "deferred"):
         for (i, x) in enumerate(simgr.deferred):
             dot_file = TRACE_SAVE_DIR + "deferred-%d.dot" % i
-            helper(proj, x.state, dot_file,
+            transition_file = TRACE_SAVE_DIR + "transition_deferred-%d" % i
+            helper(proj, x.state, dot_file, transition_file
                 # plain_file=TRACE_SAVE_DIR + "avoid-%d.txt" % i
                 )
             if i >= 9: break
     for (i, ddd) in enumerate(simgr.deadended):
         dot_file = TRACE_SAVE_DIR + "deadended-%d.dot" % i
-        helper(proj, ddd.state, dot_file)
+        transition_file = TRACE_SAVE_DIR + "transition_deadended-%d" % i
+        helper(proj, ddd.state, dot_file, transition_file)
         if i > 5: break
     for (i, err) in enumerate(simgr.errored):
         dot_file = TRACE_SAVE_DIR + "errored-%d.dot" % i
-        helper(proj, err.state, dot_file)
+        transition_file = TRACE_SAVE_DIR + "transition_errored-%d" % i
+        helper(proj, err.state, dot_file, transition_file)
         if i >= 14: break
 
 def signal_handler(signal, frame):
@@ -469,9 +469,13 @@ try:
         """
     # for func_name in ["pbuf_copy_partial"]:
     #     proj.hook(rebased_addr(func_name), handle_start_ipdb, length=sizeof(func_name))
-    if config.arch == "arm": # debug
-        for addr in [0x18010048]:
-            proj.hook(addr, handle_start_ipdb, length=4)
+    if config.arch == "arm":
+        ### hook libc functions in mbed with angr's SimProcedures
+        for symname in angr.SIM_PROCEDURES['libc'].keys():
+            print("\thooking libc '%s'" % (symname))
+            proj.hook_symbol(symname, angr.SIM_PROCEDURES['libc'][symname])
+        # for addr in [0x18010048]: # debug
+        #     proj.hook(addr, handle_start_ipdb, length=4)
 except Exception as e:
     print e
     import ipdb; ipdb.set_trace()
