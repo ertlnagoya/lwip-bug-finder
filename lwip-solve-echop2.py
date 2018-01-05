@@ -165,31 +165,6 @@ def read_memory_dump(addr, size):
             return ret
     raise Exception("unmapped addr, size: %#x, %#x" % (addr, size))
 
-# def dump_regs(state, _exit=True):
-#     global symvar_listen_pcbs, symbar_netif
-#     print "rax = %#x" % state.solver.eval(state.regs.rax)
-#     print "rdi = %#x" % state.solver.eval(state.regs.rdi)
-#     print "rsp = %#x" % state.solver.eval(state.regs.rsp)
-#     print "rbp = %#x" % state.solver.eval(state.regs.rbp)
-#     rbp = state.solver.eval(state.regs.rbp)
-#     for i in range(0, 0x48, 8):
-#         # print "mem[rbp - %#x] = %#x" % (i, state.solver.eval(state.memory.load(rbp - i, 8)))
-#         print "mem[rbp - %#x] = %#x" % (i, state.mem[rbp - i].uint64_t.concrete)
-#     for i in range(0x20000000, 0x20000000 + 0x200, 8):
-#         # v = state.solver.eval(state.memory.load(i, 8))
-#         try:
-#             v = state.mem[i].uint64_t.concrete
-#         except Exception, e:
-#             print "mem[%#x]: " % i + str(e)
-#             continue
-#         if v > 0:
-#             print "mem[%#x] = %#x" % (i, v)
-#     print "listen_pcbs:"
-#     v = state.se.eval(state.se.Reverse(symvar_listen_pcbs), cast_to=str)
-#     hexdump.hexdump(v)
-#     if _exit:
-#         exit()
-
 def conv_to_address(_list):
     ret = []
     for x in _list:
@@ -260,11 +235,13 @@ LittleEndian = lambda x: x
 ### load configuration
 config = importlib.import_module('config.' + args.config).config
 
+
 ### analysis start function
 START_FUNC = args.start_func
 if START_FUNC not in ['tcp_input', 'udp_input', 'etharp_arp_input', 'dns_recv']:
     print "[!] invalid function name"
     exit(1)
+
 
 ### choose blocks to constrain
 CONSTRAINED_BLOCKS = [1, 2] # 0, 1, 2, 3
@@ -274,12 +251,13 @@ else:
     CONSTRAINED_BLOCKS = []
 print "[*] CONSTRAINED_BLOCKS = %s" % (str(CONSTRAINED_BLOCKS))
 
+
 ### explore options given by cmdline
 DEPTH_FIRST = args.dfs # DFS Option
 CHECK_SEGV = args.check_segv
 
+
 ### load binary
-# ELF_FILE = "./bin/echop-STABLE-1_3_0"
 ELF_FILE = config.elf()
 proj = angr.Project(ELF_FILE, load_options={'auto_load_libs': False})
 start_addr = rebased_addr(START_FUNC)
@@ -287,13 +265,14 @@ print "[*] analysis start: %#x" % start_addr
 
 
 ### helper boolean
-tcp = (start_addr == rebased_addr('tcp_input'))
-udp = (start_addr == rebased_addr('udp_input')) or (start_addr == rebased_addr('dns_recv'))
-dns = (start_addr == rebased_addr('dns_recv'))
-etharp_arp = (start_addr == rebased_addr('etharp_arp_input'))
+dns = ('dns_' in START_FUNC)
+tcp = ('tcp_' in START_FUNC)
+udp = ('udp_' in START_FUNC)
+etharp_arp = ('etharp_arp_' in START_FUNC)
 ip = tcp or udp
 
 
+### pbuf_ptr
 if config.arch == "intel":
     MY_SYMVAR_REGION_BEGIN = 0x20000000
 elif config.arch == "arm":
@@ -301,21 +280,42 @@ elif config.arch == "arm":
 MY_SYMVAR_REGION_LENGTH = 0x1000000
 pbuf_ptr = MY_SYMVAR_REGION_BEGIN
 
+
 ### create initial state
-if dns:
-    print "[*] satisfying calling convention for dns"
+if START_FUNC == "dns_recv":
+    print "[*] satisfying calling convention for dns_recv"
+    """
+    dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, ip_addr_t *addr, u16_t port)
+    """
     state = proj.factory.call_state(start_addr, 0, 0, pbuf_ptr, 0, 0)
+elif START_FUNC == "tcp_input":
+    print "[*] satisfying calling convention for tcp_input"
+    """
+    tcp_input(struct pbuf *p, struct netif *inp)
+    """
+    state = proj.factory.call_state(start_addr, pbuf_ptr, 0)
 else:
     print "[!] unknown initial state"
     exit(1)
 
+
 ### add inspecter
+def outboud_access_constriant(state, read_addr):
+    arch_name = state.arch.name
+    if arch_name == "AMD64":
+        return state.solver.And(
+            read_addr > 0x00620000,
+            read_addr < 0x015ae000,
+            )
+    elif arch_name == "ARMEL": # Not Good Idea (there're no segv in mbed)
+        return state.solver.And(
+            read_addr > 0x2003b900, # pbuf->payload: 0x2003b8de
+            read_addr < 0x20040000,
+            )
+
 def is_outboud_read_access(state):
     read_addr = state.inspect.mem_read_address
-    return state.solver.satisfiable(extra_constraints=[state.solver.And(
-        read_addr > 0x00620000,
-        read_addr < 0x015ae000,
-        )])
+    return state.solver.satisfiable(extra_constraints=[outboud_access_constriant(state, read_addr)])
 
 def check_segv(state):
     global simgr
@@ -339,10 +339,7 @@ def check_segv(state):
                 v = state.solver.eval(state.solver.Reverse(symvar_pbuf_payload), cast_to=str)[:payload_len]
                 hexdump.hexdump(v)
                 for active in simgr.active:
-                    active.add_constraints(state.solver.And(
-                    read_addr > 0x00620000,
-                    read_addr < 0x015ae000,
-                    ))
+                    active.add_constraints(outboud_access_constriant(active, read_addr))
                 # import ipdb; ipdb.set_trace()
             except Exception as e:
                 print "[!] Exception: ", e
@@ -354,7 +351,7 @@ if CHECK_SEGV:
 
 
 ### map new region for my symbolic variables
-"""memo
+"""memo for echop
 gdb-peda$ vmmap
 Start              End                Perm  Name
 0x00400000         0x00418000         r-xp  /home/tomori/lwip/lwip-bug-finder/bin/echop-STABLE-1_3_0
@@ -364,13 +361,12 @@ Start              End                Perm  Name
 0x015ae000         0x015cf000         rw-p  [heap]
 """
 state.memory.mem.map_region(MY_SYMVAR_REGION_BEGIN, MY_SYMVAR_REGION_LENGTH, 0b011) # begin, len, permissions(rw-p)
-# MAPPED_BEGIN = 0x00619000
-# MAPPED_LENGTH = 0x3000
-# state.memory.mem.map_region(MAPPED_BEGIN, MAPPED_LENGTH, 0b111) # begin, len, permissions # Already mapped?
+
 
 ### change options
-state.options.add("STRICT_PAGE_ACCESS") # to handle SEGV
-state.options.add("REPLACEMENT_SOLVER")
+if dns:
+    state.options.add("STRICT_PAGE_ACCESS") # to handle SEGV
+    # state.mem[0x00900].uint32_t = 1145 # to check mode; => 'write-miss'
 # import ipdb; ipdb.set_trace()
 
 
@@ -384,7 +380,7 @@ try:
     if hasattr(info, "filesum"):
         print("[*] checking file consistency...")
         if check_file_consistency(ELF_FILE, info.filesum) is False:
-            raise Exception("[!] target file is newer than pre-processed one.")
+            raise Exception("[!] target file is NOT the one pre-processed.")
         print("\tOK")
     else:
         print("[!] info file does not have file hash. should preprocess")
@@ -396,18 +392,22 @@ except IOError as e:
 
 
 ### load memory dump
-print "[*] loading memory dump"
-if hasattr(config, "dump") and config.dump:
-    DUMP_FILE = config.dump
+if len(config.init_objs) > 0:
+    print "[*] loading memory dump"
+    if hasattr(config, "dump") and config.dump:
+        DUMP_FILE = config.dump
+    else:
+        DUMP_FILE = ELF_FILE + "-dump.zip"
+    try:
+        load_memory_dump(DUMP_FILE)
+    except IOError as e:
+        print e
+        print "[!] there're no memory dumps"
+        print "[!] run `source ./memory-dump.py` in gdb first" % ()
+        exit()
 else:
-    DUMP_FILE = ELF_FILE + "-dump.zip"
-try:
-    load_memory_dump(DUMP_FILE)
-except IOError as e:
-    print e
-    print "[!] there're no memory dumps"
-    print "[!] run `source ./memory-dump.py` in gdb first" % ()
-    exit()
+    print("[*] there're no initialized objects. skip loading memory dump")
+
 
 ### disables function calls. and sets return value 0
 def handle_ret_0(state):
@@ -419,7 +419,7 @@ def handle_ret_0(state):
     else:
         raise Exception("[!] Unknown Arch name '%s'" % (arch_name))
 
-### ipdb
+### start ipdb
 def handle_start_ipdb(state):
     import ipdb; ipdb.set_trace()
 
@@ -430,26 +430,12 @@ try:
     if hasattr(config, "skip_funcs"):
         funcs += config.skip_funcs
     else:
-        exit(1)
-    if dns:
-        pass
-    else:
-        funcs += [
-        "tcp_debug_print_flags", "tcp_debug_print",
-        "udp_debug_print", # debug output
-        "__printf_chk", # ??
-        "inet_chksum_pseudo", # checksum check
-        "inet_chksum_pseudo_partial",
-        "tcp_rst",
-        # "tcp_process", # tcp state machine
-        "sys_arch_protect", "sys_arch_unprotect", # SYS_ARCH_PROTECT, SYS_ARCH_UNPROTECT
-        "sys_arch_sem_wait",
-        ]
+        raise Exception("config.skip_funcs is not defined")
     if len(funcs) > 0:
         print("[*] hooking functions...")
         if config.arch == "intel":
             hook_length = 5
-            hook_offset = 0x400000
+            hook_offset = 0x400000  # dirty hack
         else:
             hook_length = 4
             hook_offset = 0
@@ -474,12 +460,11 @@ try:
         for symname in angr.SIM_PROCEDURES['libc'].keys():
             print("\thooking libc '%s'" % (symname))
             proj.hook_symbol(symname, angr.SIM_PROCEDURES['libc'][symname])
-        # for addr in [0x18010048]: # debug
-        #     proj.hook(addr, handle_start_ipdb, length=4)
 except Exception as e:
     print e
     import ipdb; ipdb.set_trace()
 
+# proj.hook(0x1802f548, handle_start_ipdb, length=4)
 
 ### enable debug flag
 if config.arch == "intel":
@@ -506,6 +491,10 @@ gdb-peda$ x/8wx $rdi
 0x560bea7cbe78 <memp_memory+18968>: 0x00000000  0x00000000  0xea7cbe9e  0x0000560b
 0x560bea7cbe88 <memp_memory+18984>: 0x00300030  0x00010003  0x04030201  0xa6920605 // + 16
 """
+if config.arch == "arm":
+    pbuf_payload = 0x2003b8de
+else:
+    pbuf_payload = 0x61f7a2  # pbuf is located in section "mapped"
 if config.arch_bits == 64:
     pbuf_next = pbuf_ptr + 0x0
     pbuf_payload_ptr = pbuf_ptr + 0x8
@@ -514,6 +503,8 @@ if config.arch_bits == 64:
     pbuf_type = pbuf_ptr + 0x14
     pbuf_flags = pbuf_ptr + 0x15
     pbuf_ref = pbuf_ptr + 0x16
+    # state.mem[pbuf_next].uint64_t = 0 # NULL
+    state.mem[pbuf_payload_ptr].uint64_t = pbuf_payload # => p->payload == pbuf_payload
 elif config.arch_bits == 32:
     """
     pbuf:
@@ -531,26 +522,23 @@ elif config.arch_bits == 32:
     pbuf_type = pbuf_ptr + 12  # u8_t
     pbuf_flags = pbuf_ptr + 13  # u8_t
     pbuf_ref = pbuf_ptr + 14  # u16_t
-if config.arch == "arm":
-    pbuf_payload = 0x2003b8de
+    # state.mem[pbuf_next].uint32_t = 0 # NULL
+    state.mem[pbuf_payload_ptr].uint32_t = pbuf_payload # => p->payload == pbuf_payload
 else:
-    pbuf_payload = 0x61f7a2  # pbuf is located in section "mapped" (TODO: arm)
-
-
-state.mem[pbuf_next].qword = 0 # NULL
-state.mem[pbuf_payload_ptr].qword = pbuf_payload # => p->payload == pbuf_payload
+    raise Exception("could not layout pbuf")
 
 ### symbolize pbuf.tot_len
 symvar_pbuf_tot_len = state.se.BVS('pbuf_tot_len', 16) # u16_t
-# state.add_constraints(symvar_pbuf_tot_len > 0)
-state.add_constraints(symvar_pbuf_tot_len == 0x3e) # for dns_recv
+if dns:
+    state.add_constraints(symvar_pbuf_tot_len == 0x3e) # IMPORTANT; for dns_recv
+else:
+    state.add_constraints(symvar_pbuf_tot_len > 0)
 state.memory.store(pbuf_tot_len, state.se.Reverse(symvar_pbuf_tot_len))
 
 ### symbolize pbuf.len
 symvar_pbuf_len = state.se.BVS('pbuf_len', 16) # u16_t
 state.add_constraints(symvar_pbuf_tot_len == symvar_pbuf_len)
 ip_min_len = 20
-min_len = 0
 if dns:
     min_len = 0x3e
 elif tcp:
@@ -563,8 +551,11 @@ state.memory.store(pbuf_len, state.se.Reverse(symvar_pbuf_len))
 
 ### symbolize pbuf.type
 symvar_pbuf_type = state.se.BVS('pbuf_type', 8)
-state.add_constraints(symvar_pbuf_type == 0x0)
-# state.add_constraints(state.se.Or(symvar_pbuf_type == 0x0, symvar_pbuf_type == 0x3))
+if dns:
+    state.add_constraints(symvar_pbuf_type == 0x0)
+else:
+    # state.add_constraints(state.se.Or(symvar_pbuf_type == 0x0, symvar_pbuf_type == 0x3)) # RAM = 0, REF = 2, POOL = 3
+    pass ### should not constrain pbuf->type in pbuf_header (called by tcp_input)
 state.memory.store(pbuf_type, state.se.Reverse(symvar_pbuf_type))
 
 ### symbolize pbuf.ref
@@ -576,55 +567,75 @@ state.memory.store(pbuf_ref, state.se.Reverse(symvar_pbuf_ref))
 L2_PAYLOAD_MAX_LEN = 1500 # 1518 (max Ether frame size) - 14 (address) - 4 (FCS)
 symvar_pbuf_payload = state.se.BVS('pbuf_payload', L2_PAYLOAD_MAX_LEN * 8)
 tcp_header_offset = 5 * 4 * 8
-"""
-gdb-peda$ x/12wx p->payload
-0x61f7a2 <memp_memory+8930>:    0x80810000  0xffff0100  0x00000000  0x77777703
-0x61f7b2 <memp_memory+8946>:    0x6f6f6706  0x03656c67  0x006d6f63  0x01000100
-0x61f7c2 <memp_memory+8962>:    0x77777703  0x6f6f6706  0x03656c67  0x006d6f63
-0x61f7d2 <memp_memory+8978>:    0x01000100  0x00000000  0x007f0400  0x000c0100
-"""
-### block 0
-if 0 in CONSTRAINED_BLOCKS:
-    print("[*] block 0 has constrained!")
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pbuf_payload)) == 0x80810000)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0x01000100) # Answer RRs = 0x01
-    ## state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
+if dns:
+    """
+    gdb-peda$ x/12wx p->payload
+    0x61f7a2 <memp_memory+8930>:    0x80810000  0xffff0100  0x00000000  0x77777703
+    0x61f7b2 <memp_memory+8946>:    0x6f6f6706  0x03656c67  0x006d6f63  0x01000100
+    0x61f7c2 <memp_memory+8962>:    0x77777703  0x6f6f6706  0x03656c67  0x006d6f63
+    0x61f7d2 <memp_memory+8978>:    0x01000100  0x00000000  0x007f0400  0x000c0100
+    """
+    ### block 0
+    if 0 in CONSTRAINED_BLOCKS:
+        print("[*] block 0 has constrained!")
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 4 - 1, 8 * 0, symvar_pbuf_payload)) == 0x80810000)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0x01000100) # Answer RRs = 0x01
+        ## state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
 
-### block 1
-if 1 in CONSTRAINED_BLOCKS:
-    print("[*] block 1 has constrained!")
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
+    ### block 1
+    if 1 in CONSTRAINED_BLOCKS:
+        print("[*] block 1 has constrained!")
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 20 - 1, 8 * 16, symvar_pbuf_payload)) == 0x6f6f6706)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
 
-### block 2
-if 2 in CONSTRAINED_BLOCKS:
-    print("[*] block 2 has constrained!")
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 36 - 1, 8 * 32, symvar_pbuf_payload)) == 0x77777703)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 40 - 1, 8 * 36, symvar_pbuf_payload)) == 0x6f6f6706)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_pbuf_payload)) == 0x03656c67)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
+    ### block 2
+    if 2 in CONSTRAINED_BLOCKS:
+        print("[*] block 2 has constrained!")
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 36 - 1, 8 * 32, symvar_pbuf_payload)) == 0x77777703)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 40 - 1, 8 * 36, symvar_pbuf_payload)) == 0x6f6f6706)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_pbuf_payload)) == 0x03656c67)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
 
-### block 3
-if 3 in CONSTRAINED_BLOCKS:
-    print("[*] block 3 has constrained!")
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
-    ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
-    state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
-
+    ### block 3
+    if 3 in CONSTRAINED_BLOCKS:
+        print("[*] block 3 has constrained!")
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 52 - 1, 8 * 48, symvar_pbuf_payload)) == 0x01000100)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 56 - 1, 8 * 52, symvar_pbuf_payload)) == 0)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
+        ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
+        state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
+elif tcp:
+    state.add_constraints(state.se.Extract(7, 0, symvar_pbuf_payload) == 0x45) # ip version & ip header size (IPHL)
+    state.add_constraints(state.se.Reverse(state.se.Extract(31, 16, symvar_pbuf_payload)) == symvar_pbuf_len) # Total Length in IP header
+    state.add_constraints(state.se.Extract(32 * 2 + 7, 32 * 2 + 0, symvar_pbuf_payload) > 0) # TTL
+    symvar_ip_proto = state.se.Extract(32 * 2 + 15, 32 * 2 + 8, symvar_pbuf_payload)
+    if tcp:
+        state.add_constraints(symvar_ip_proto == 6) # ip proto (TCP = 6, UDP = 0x11)
+    elif udp:
+        state.add_constraints(symvar_ip_proto == 0x11) # ip proto (TCP = 6, UDP = 0x11)
+    else:
+        state.add_constraints(state.se.Or(symvar_ip_proto == 6, symvar_ip_proto == 0x11)) # ip proto (TCP = 6, UDP = 0x11)
+    state.add_constraints(state.se.Reverse(state.se.Extract(32 * 3 + 31, 32 * 3 + 0, symvar_pbuf_payload)) == 0xc0a80001) # ip src (192.168.0.1)
+    state.add_constraints(state.se.Reverse(state.se.Extract(32 * 4 + 31, 32 * 4 + 0, symvar_pbuf_payload)) == 0xc0a80002) # ip dest (192.168.0.2)
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) > 0) # seqno
+    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) > 0) # ackno
+    if tcp:
+        symvar_tcp_dataofs = state.solver.Extract(tcp_header_offset + 96 + 7, tcp_header_offset + 96 + 4, symvar_pbuf_payload)
+        state.add_constraints(state.se.And(symvar_tcp_dataofs >= 5, symvar_tcp_dataofs <= 15)) # tcp length
+    pass
+### load packet to engine
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
 print "[*] pbuf->payload"
 v = state.se.eval(state.se.Reverse(symvar_pbuf_payload), cast_to=str)
-hexdump.hexdump(v[:0x40])
+hexdump.hexdump(v[:0x80])
 
-### load initalized object values
-print "[*] loading initalized objects to engine:"
+### load initialized object values
+print "[*] loading initialized objects to engine:"
 for objname in config.init_objs:
     begin = rebased_addr(objname)
     print "\tloading %s ... (addr = %#x)" % (objname, begin)
@@ -634,10 +645,10 @@ for objname in config.init_objs:
         state.mem[begin + i * 4].uint32_t = v
 
 #### check if initialized correctry
-v = state.se.eval(state.memory.load(rebased_addr("dns_table"), 0x120), cast_to=str)
-hexdump.hexdump(v)
-# import ipdb; ipdb.set_trace()
-# exit()
+if dns:
+    print("dns_table:")
+    v = state.se.eval(state.memory.load(rebased_addr("dns_table"), 0x120), cast_to=str)
+    hexdump.hexdump(v)
 
 
 ### load initial state to engine (Simulation Manager)
@@ -664,6 +675,7 @@ print "[*] avoid = %s" % str(map(lambda x: hex(x), avoid))
 
 def step_func(lpg):
     global find, avoid, THREADING, DEPTH_FIRST
+    # time.sleep(0.2)
     if THREADING:
         if find is not []:
             lpg.stash(filter_func=lambda path: path.addr in find, from_stash='active', to_stash='found')
@@ -693,6 +705,8 @@ def step_func(lpg):
     return lpg
 
 def until_func(lpg):
+    if len(lpg.found) > 0:
+        return True
     if len(lpg.errored) > 0:
         return True
     if len(lpg.active) == 0: # No Meaning
@@ -708,7 +722,7 @@ time.sleep(5)
 assert(avoid is not [])
 simgr.step(step_func=step_func, until=until_func) # explore until error occurs (or active stashes exhausts)
 print "[*] explore finished!!"
-# exit(1) # to utilize vmprof
+# exit(1) # uncomment to utilize vmprof
 
 print "[*] mode:"
 print "\tTHREADING = %r" % (THREADING)
@@ -723,6 +737,14 @@ sys.stdout = ftxt # redirect to a file
 FOUND_RESULT = len(simgr.found) > 0 or len(simgr.errored) > 0
 if FOUND_RESULT:
     plot_trace()
+
+    if dns:
+        layer = "DNS"
+    if tcp or udp:
+        layer = "IP"
+    else:
+        layer = "Raw"
+
     ### save results
     result = open(RESULT_PY, "w")
     result.write("""#!/usr/bin/python2
@@ -737,9 +759,9 @@ except ImportError:
 ### ==================================================================
 def usage():
     cmd_name = sys.argv[0]
-    print("usage: [sudo] %s [PACKET_NO]" % cmd_name)
+    print("usage: [sudo] %s [IFACE] [PACKET_NO]" % cmd_name)
     print("\\tto preview packet: %s" % cmd_name)
-    print("\\tto send packet: sudo %s PACKET_NO" % cmd_name)
+    print("\\tto send packet with eth0: sudo %s eth0 PACKET_NO" % cmd_name)
     print("")
     print("PACKET_NO of packets are indicated in this script.")
     exit()
@@ -771,10 +793,14 @@ def eth_type(p):
 
 IS_ROOT = (os.geteuid() == 0)
 PACKET_NO = -1
-if len(sys.argv) == 2:
+if len(sys.argv) == 1:
+    pass
+elif len(sys.argv) < 3:
     if sys.argv[1] in ["--help", "-h"]:
         usage()
-    PACKET_NO = int(sys.argv[1])
+else:
+    IFACE = sys.argv[1]
+    PACKET_NO = int(sys.argv[2])
 if PACKET_NO > 0 and not IS_ROOT:
     print("[!] you must be _root_ to send packet! exit.")
     exit(1)
@@ -812,8 +838,15 @@ print("found #{no:d}: pbuf.payload:")
 payload_len = {len:}
 v = pickle.loads(b{dump!r})
 v = v[:payload_len] # trim unused payload
-# p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/{layer!s}(_pkt=v) # FIXME: dport must be corrected
-p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/Raw(v) # FIXME: dport must be corrected
+if {layer} == DNS:
+    p = IP(src="8.8.8.8", dst="192.168.0.2")/UDP(sport=53, dport=0x1000)/Raw(v) # FIXME: dport must be corrected
+else:
+    p = {layer}(_pkt=v)
+if p.haslayer(IP):
+    p[IP].ttl = 128
+if p.haslayer(TCP):
+    # p[TCP].dport = 80
+    pass
 
 recalc_chksums(p)
 try:
@@ -826,14 +859,13 @@ b = bytes(p)[:payload_len]
 if IS_ROOT and PACKET_NO == {no:d}: # send mode
     ### write your script here...
     ### send(p) trims padding automatically, so I use this one
-    if {ip!r}:
-        # sendp(Ether(dst="11:45:14:11:45:14", type=eth_type(p))/b, iface="tap0")
-        send(p)
+    sendp(Ether(dst="11:45:14:11:45:14", type=eth_type(p))/b, iface=IFACE)
+    send(p)
 else: # preview mode
     ### write your script here...
     hexdump(b)
     pass
-""".format(no=i, dump=pickle.dumps(v), len=l2_payload_len, ip=ip, etharp=etharp_arp, layer="DNS"))
+""".format(no=i, dump=pickle.dumps(v), len=l2_payload_len, ip=ip, etharp=etharp_arp, layer=layer))
             print "found #%d: pbuf:" % (i)
             v = memory_dump(found, pbuf_ptr, 0x20)
             hexdump.hexdump(v)
@@ -879,7 +911,8 @@ if IS_ROOT and PACKET_NO == {no:d}: # send mode
     ### write your script here...
     ### send(p) trims padding automatically, so I use this one
     if {ip!r}:
-        # sendp(Ether(dst="11:45:14:11:45:14", type=eth_type(p))/b, iface="tap0")
+        sendp(Ether(dst="00:02:f7:f0:00:00", type=eth_type(p))/b, iface=IFACE)
+    if {dns!r}:
         send(p)
 else: # preview mode
     ### write your script here...
@@ -887,10 +920,10 @@ else: # preview mode
     pass
 """.format(no=(i + num_founds), dump=pickle.dumps(v), len=payload_len, ip=ip, layer="DNS"))
     except Exception as e:
-        print e
         result.close()
         sys.stdout = fout # re-enable stdout
         ftxt.close()
+        print e
         import ipdb; ipdb.set_trace()
 
     ### the end of iteration
@@ -904,7 +937,8 @@ else: # if FOUND_RESULT
 sys.stdout = fout # re-enable stdout
 ftxt.close()
 ### print final result if exists (this can be comment outed)
-os.system("if [ -e {py} ]; then (echo; echo '[*] preview of attack packets'; python2 {py}) >> {txt}; fi".format(py=RESULT_PY, txt=RESULT_TXT))
+if FOUND_RESULT:
+    os.system("if [ -e {py} ]; then (echo; echo '[*] preview of attack packets'; python2 {py}) >> {txt}; fi".format(py=RESULT_PY, txt=RESULT_TXT))
 os.system("cat %s" % (RESULT_TXT)) # print solver script message
 
 if FOUND_RESULT:

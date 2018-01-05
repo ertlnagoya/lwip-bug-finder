@@ -12,7 +12,7 @@ if os.geteuid() != 0:
     exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
 
 s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
-s.bind(("tap0", 0))
+s.bind(("enp0s25", 0))
 
 # send(IP(dst="192.168.0.2")/TCP(dport=80, options=[('NOP', 0), ('NOP', 0)]))
 pkt = bytes(bytearray.fromhex("0102030405065a4272f9a33808004500002c000100004006f977c0a80001c0a8000200140050000000000000000060022000fd25000001010000"))

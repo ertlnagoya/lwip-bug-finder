@@ -145,7 +145,7 @@ pbuf_payload_ptr = pbuf_ptr + 0x8
 pbuf_tot_len = pbuf_ptr + 0x10
 pbuf_len = pbuf_ptr + 0x12
 pbuf_payload = 0x20000100
-state.mem[pbuf_payload_ptr].qword = pbuf_payload
+state.mem[pbuf_payload_ptr].uint32_t = pbuf_payload
 
 ### symbolize pbuf.tot_len
 symvar_pbuf_tot_len = state.se.BVS('pbuf_tot_len', 16)

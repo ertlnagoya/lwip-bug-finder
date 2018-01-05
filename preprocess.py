@@ -19,10 +19,11 @@ def arch(ELF_FILE):
         b = f.read(32)
     assert(len(b) > 0)
     e_machine = struct.unpack('<H', b[0x12:0x14])[0]
-    if e_machine in [3, 50]:
+    if e_machine in [3, 50, 62]:
         return "intel"
     if e_machine == 40:
         return "arm"
+    return "UNKOWN"
 
 def caller_addr_list(inst_name, func_name):
     global OBJDUMP_FILE
@@ -73,13 +74,13 @@ def main(argc, argv):
             info = pickle.load(f)
             import ipdb; ipdb.set_trace()
 
-    print("""obtain symbols""")
+    print("""[*] obtain symbols""")
     err = os.system("nm --print-size %s > %s" % (ELF_FILE, SYMS_FILE))
     if err:
         print "[!] dumping symbols error!"
         exit(1)
 
-    print("""translate symbols file to symbols object""")
+    print("""[*] translate symbols file to symbols object""")
     symbols = {}
     with open(SYMS_FILE) as f:
         for x in f.readlines():
@@ -96,13 +97,13 @@ def main(argc, argv):
             except Exception:
                 import ipdb; ipdb.set_trace()
 
-    print("""objdump""")
+    print("""[*] objdump""")
     err = os.system("%s -d %s > %s" % (OBJDUMP, ELF_FILE, OBJDUMP_FILE))
     if err:
         print "[!] objdump error!"
         exit(1)
 
-    print("""obtain function callers""")
+    print("""[*] obtain function callers""")
     call = {}
     for x in symbols.keys():
         if ARCH == "intel":
@@ -114,7 +115,7 @@ def main(argc, argv):
             exit(1)
         call[x] = caller_addr_list(inst_name, x)
 
-    print("""disassembly""")
+    print("""[*] disassembly""")
     disasm = {}
     with open(OBJDUMP_FILE) as f:
         for x in f.readlines():
@@ -130,11 +131,11 @@ def main(argc, argv):
                         pass
                     disasm[int(addr, 16)] = asm
 
-    print("""file hash""")
+    print("""[*] file hash""")
     with open(ELF_FILE, 'rb') as f:
         filesum = hashlib.md5(f.read()).hexdigest()
 
-    print("""save result""")
+    print("""[*] save result""")
     info = Info(symbols=symbols, disasm=disasm, call=call, filesum=filesum)
     with open(INFO_FILE, "w") as f:
         pickle.dump(info, f)
