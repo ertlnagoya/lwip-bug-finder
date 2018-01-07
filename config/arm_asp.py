@@ -4,7 +4,7 @@ class config(template):
     arch = "arm"
     arch_bits = 32
     ELF_FILE = "./bin/httpsample.elf"
-    dump = "bin/httpsample.bin-dump.zip"
+    dump = "bin/httpsample.bin-dump-20180105.zip"
     skip_funcs = ['iprintf', 'sys_arch_protect', 'tcp_debug_print', 'DumpHex']
     init_objs = ["dns_table", "dns_payload"]
     find = ['mbed_die', 'assert_printf']

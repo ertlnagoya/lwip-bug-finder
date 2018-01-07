@@ -149,11 +149,14 @@ def set_regs(debuggable, regs):
         # print("%s <= %#x" % (REGISTERS[i], regs[i]))
         debuggable.set_register(REGISTERS[i], regs[i])
 
-def do_dump(t, address, size):
+def read_memory(debuggable, address, size):
+    return debuggable._gdb_interface._gdb.sync_cmd(["-data-read-memory", "0x%x" % address, "x", "4", "1", "%d" % (size / 4)], "done")['memory'][0]['data']
+
+def do_dump(debuggable, address, size):
     begin = address
     end = address + size
     file_name = 'memory-{begin:x}-{end:x}'.format(begin=begin, end=end)
-    data = t._gdb_interface._gdb.sync_cmd(["-data-read-memory", "0x%x" % address, "x", "4", "1", "%d" % (size / 4)], "done")['memory'][0]['data']
+    data = read_memory(debuggable, address, size)
     ret = b''
     for x in data:
         ret += struct.pack('<I', int(x, 16))
@@ -222,6 +225,15 @@ def main():
     t.cont()
     main_bkt.wait()
 
+    # ### for experiment
+    # print("[*] waiting for mbed_die")
+    # mbed_die_addr = get_symbol_addr(elf_file, "mbed_die")
+    # print("[*] mbed_die = %#x" % (mbed_die_addr))
+    # mbed_die_bkt = t.set_breakpoint(mbed_die_addr)
+    # t.cont()
+    # mbed_die_bkt.wait()
+    # print("[*] reached to mbed_die()")
+
     print("[+] Target finished initilization procedures")
     read_pointer_value(t, elf_file, "tcp_active_pcbs")
     read_pointer_value(t, elf_file, "tcp_listen_pcbs")
@@ -235,14 +247,16 @@ def main():
     K_atc% nm httpsample.elf| grep dns_table
     2003acac b dns_table
     """
-    # ret = t.read_untyped_memory(0x18000000, 0x20000000 - 0x18000000) # TOO SLOW
+    start = time.time()
     try:
+        # ret = t.read_untyped_memory(0x18000000, 0x20000000 - 0x18000000) # TOO SLOW
+        # t.read_untyped_memory(0x18000000, 0x1000) # for experiment
+        # read_memory(t, 0x18000000, 0x1000) # for experiment
         memory_dump(t, BIN_FILE, [(0x20030000, 0x20050000 - 0x20030000)]) # < 5 min
-        # memory_dump(t, BIN_FILE, [(0x20000000, 0x20a00000 - 0x20000000)]) # SLOW!
     except Exception as e:
         print(e)
         import ipdb; ipdb.set_trace()
-
+    print("[+] memory read time: %f sec" % (time.time() - start))
     # import ipdb; ipdb.set_trace()
 
     #Further analyses code goes here
