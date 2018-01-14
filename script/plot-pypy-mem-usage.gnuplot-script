@@ -4,6 +4,24 @@
 set term png small size 800,600
 set output "angr-mem-graph.png"
 
+set tics font "Arial,16"
+set xlabel font "Arial,16"
+set ylabel font "Arial,16"
+set y2label font "Arial,16"
+set label font "Arial,16"
+set key font "Arial,16" # legend
+
+set lmargin 20 # 左マージン
+set rmargin 15 # 右マージン
+set tmargin 3 # 上マージン
+set bmargin 6 # 下マージン
+set xlabel offset 0,-2
+set ylabel offset -6,0
+set y2label offset 6,0
+set xtics offset 0,-0.5
+set key right bottom spacing 1.5
+
+set border linewidth 2
 set xlabel "Time (10 sec)"
 set ylabel "VSZ (KB)"
 set y2label "%MEM"
@@ -14,5 +32,5 @@ set y2tics nomirror in
 set yrange [0:*]
 set y2range [0:*]
 
-plot "angr-mem.log" using 4 with lines axes x1y1 title "VSZ", \
-     "angr-mem.log" using 3 with lines axes x1y2 title "%MEM"
+plot "angr-mem.log" using 4 with lines axes x1y1 title "VSZ" linewidth 3.5, \
+     "angr-mem.log" using 3 with lines axes x1y2 title "%MEM" linewidth 3.5
