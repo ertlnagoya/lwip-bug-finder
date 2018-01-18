@@ -588,7 +588,6 @@ if dns:
         ## state.add_constraints(LittleEndian(state.se.Extract(8 * 8 - 1, 8 * 4, symvar_pbuf_payload)) == 0xff000100) # Answer RRs = 0xff
         state.add_constraints(LittleEndian(state.se.Extract(8 * 12 - 1, 8 * 8, symvar_pbuf_payload)) == 0)
         state.add_constraints(LittleEndian(state.se.Extract(8 * 16 - 1, 8 * 12, symvar_pbuf_payload)) == 0x77777703)
-
     ### block 1
     if 1 in CONSTRAINED_BLOCKS:
         print("[*] block 1 has constrained!")
@@ -596,7 +595,6 @@ if dns:
         state.add_constraints(LittleEndian(state.se.Extract(8 * 24 - 1, 8 * 20, symvar_pbuf_payload)) == 0x03656c67)
         state.add_constraints(LittleEndian(state.se.Extract(8 * 28 - 1, 8 * 24, symvar_pbuf_payload)) == 0x006d6f63)
         state.add_constraints(LittleEndian(state.se.Extract(8 * 32 - 1, 8 * 28, symvar_pbuf_payload)) == 0x01000100)
-
     ### block 2
     if 2 in CONSTRAINED_BLOCKS:
         print("[*] block 2 has constrained!")
@@ -604,7 +602,6 @@ if dns:
         state.add_constraints(LittleEndian(state.se.Extract(8 * 40 - 1, 8 * 36, symvar_pbuf_payload)) == 0x6f6f6706)
         state.add_constraints(LittleEndian(state.se.Extract(8 * 44 - 1, 8 * 40, symvar_pbuf_payload)) == 0x03656c67)
         state.add_constraints(LittleEndian(state.se.Extract(8 * 48 - 1, 8 * 44, symvar_pbuf_payload)) == 0x006d6f63)
-
     ### block 3
     if 3 in CONSTRAINED_BLOCKS:
         print("[*] block 3 has constrained!")
@@ -613,10 +610,10 @@ if dns:
         state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007f0400)
         ## state.add_constraints(LittleEndian(state.se.Extract(8 * 60 - 1, 8 * 56, symvar_pbuf_payload)) == 0x007fffff)
         state.add_constraints(LittleEndian(state.se.Extract(8 * 64 - 1, 8 * 60, symvar_pbuf_payload)) == 0x000c0100)
-elif tcp:
+elif tcp or udp:
     state.add_constraints(state.se.Extract(7, 0, symvar_pbuf_payload) == 0x45) # ip version & ip header size (IPHL)
     state.add_constraints(state.se.Reverse(state.se.Extract(31, 16, symvar_pbuf_payload)) == symvar_pbuf_len) # Total Length in IP header
-    state.add_constraints(state.se.Extract(32 * 2 + 7, 32 * 2 + 0, symvar_pbuf_payload) > 0) # TTL
+    state.add_constraints(state.se.Extract(32 * 2 + 7, 32 * 2 + 0, symvar_pbuf_payload) > 0) # TTL (MUST be larger than 0)
     symvar_ip_proto = state.se.Extract(32 * 2 + 15, 32 * 2 + 8, symvar_pbuf_payload)
     if tcp:
         state.add_constraints(symvar_ip_proto == 6) # ip proto (TCP = 6, UDP = 0x11)
@@ -626,18 +623,17 @@ elif tcp:
         state.add_constraints(state.se.Or(symvar_ip_proto == 6, symvar_ip_proto == 0x11)) # ip proto (TCP = 6, UDP = 0x11)
     state.add_constraints(state.se.Reverse(state.se.Extract(32 * 3 + 31, 32 * 3 + 0, symvar_pbuf_payload)) == 0xc0a80001) # ip src (192.168.0.1)
     state.add_constraints(state.se.Reverse(state.se.Extract(32 * 4 + 31, 32 * 4 + 0, symvar_pbuf_payload)) == 0xc0a80002) # ip dest (192.168.0.2)
-    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x3f, tcp_header_offset + 0x20, symvar_pbuf_payload)) > 0) # seqno
-    state.add_constraints(state.se.Reverse(state.solver.Extract(tcp_header_offset + 0x5f, tcp_header_offset + 0x40, symvar_pbuf_payload)) > 0) # ackno
     if tcp:
         symvar_tcp_dataofs = state.solver.Extract(tcp_header_offset + 96 + 7, tcp_header_offset + 96 + 4, symvar_pbuf_payload)
         state.add_constraints(state.se.And(symvar_tcp_dataofs >= 5, symvar_tcp_dataofs <= 15)) # tcp length
-    pass
+
 ### load packet to engine
 state.memory.store(pbuf_payload, state.se.Reverse(symvar_pbuf_payload))
 
 print "[*] pbuf->payload"
 v = state.se.eval(state.se.Reverse(symvar_pbuf_payload), cast_to=str)
 hexdump.hexdump(v[:0x80])
+
 
 ### load initialized object values
 print "[*] loading initialized objects to engine:"
@@ -848,7 +844,7 @@ if {layer} == DNS:
 else:
     p = {layer}(_pkt=v)
 if p.haslayer(IP):
-    p[IP].ttl = 128
+    pass
 if p.haslayer(TCP):
     # p[TCP].dport = 80
     pass
