@@ -7,12 +7,20 @@ import hexdump
 import socket
 import time
 
+def usage():
+    print("usage: {} IFACE".format(sys.argv[0]))
+    print("IFACE is mainly tap0, enp0s, or else")
+    exit(1)
+
+if len(sys.argv) < 2:
+    usage()
+IFACE = sys.argv[1]
 
 if os.geteuid() != 0:
     exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
 
 s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
-s.bind(("enp0s25", 0))
+s.bind((IFACE, 0)) # tap0, or other ether device
 
 # send(IP(dst="192.168.0.2")/TCP(dport=80, options=[('NOP', 0), ('NOP', 0)]))
 pkt = bytes(bytearray.fromhex("0102030405065a4272f9a33808004500002c000100004006f977c0a80001c0a8000200140050000000000000000060022000fd25000001010000"))
