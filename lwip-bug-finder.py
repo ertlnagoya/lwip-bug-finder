@@ -452,14 +452,6 @@ try:
         else:
             print "[!] info.call has not key '%s'" % func_name
             exit(1)
-        """buggy. not implemented correctly
-        # addr = rebased_addr(func_name)
-        # size = sizeof(func_name)
-        # print("\thooking %s (addr=%#x, size=%#x)" % (func_name, addr, size))
-        # proj.hook(addr, handle_ret_0, length=size)
-        """
-    # for func_name in ["pbuf_copy_partial"]:
-    #     proj.hook(rebased_addr(func_name), handle_start_ipdb, length=sizeof(func_name))
     if config.arch == "arm":
         ### hook libc functions in mbed with angr's SimProcedures
         for symname in angr.SIM_PROCEDURES['libc'].keys():
