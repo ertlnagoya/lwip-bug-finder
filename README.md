@@ -67,13 +67,13 @@ You must specificate target binary name ans memory areas using arguments.
 
 dump steps: 
 
-1. load this script in gdb attached to target process
+1. load this script in gdb attached to target process (use `source` command in gdb)
 2. run `python memory_dump(BIN_NAME, [(begin,end)])`
     * `(begin, end)` is a address pair of memory area
 
 for example:
 
-```
+```plain
 $ sudo gdb -p `pgrep echop` ### attach to target process
 [...]
 gdb-peda$ source /media/sf_share/lwip/memory-dump.py 
@@ -88,11 +88,11 @@ zip name: bin/echop-STABLE-1_3_0-dump.zip
 ### to find [bug #24596](http://savannah.nongnu.org/bugs/?24596)
 (runtime: < 30 sec)
 
-Running `lwip-solve-bug22983.py` will generates attack packet and saves result to `result.py`.
+Running `lwip-solve-bug24596.py` will generates attack packet and saves result to `result.py`.
 
 Run `sudo ./simhost-STABLE-XXX -d` and run `sudo python result.py 0` to attack simhost. Version of lwip must be 1.x.
 
-`script/lwip-bug22983.py` is PoC of this lwip [bug #24596](http://savannah.nongnu.org/bugs/?24596).
+`script/lwip-bug24596.py` is PoC of this lwip [bug #24596](http://savannah.nongnu.org/bugs/?24596).
 
 ### to find DNS bugs
 (runtime: < 3 min)
@@ -101,12 +101,15 @@ Run `sudo ./simhost-STABLE-XXX -d` and run `sudo python result.py 0` to attack s
 
 Exploration results are saved to `last-output` directory when exploration succeeded.
 
-Run to find DNS bug #1: `pypy ./lwip-solve-echop2.py -f dns_recv -b 1,2 --dfs`
+Run to find DNS bug #1: `pypy ./lwip-bug-finder.py -f dns_recv -b 1,2 --dfs`
 
-Run to find DNS bug #2: `pypy ./lwip-solve-echop2.py -f dns_recv -b 1,2 --segv`
+Run to find DNS bug #2: `pypy ./lwip-bug-finder.py -f dns_recv -b 1,2 --segv`
 
 #### about options
-Here are options in `lwip-solve-echop2.py`:
+Here are options in `lwip-bug-finder.py`:
+
+`-c`
+: __(required)__ configuration file (must be located in `config` directory) 
 
 `-f`
 : __(required)__ function name to start analysis
@@ -117,6 +120,11 @@ Here are options in `lwip-solve-echop2.py`:
 `--segv`
 : Segv detection mode
 
+for exmaple:
+
+```bash
+./lwip-bug-finder.py -c intel_echop -f dns_recv -b 1,2 --dfs
+```
 
 Tips
 ----
