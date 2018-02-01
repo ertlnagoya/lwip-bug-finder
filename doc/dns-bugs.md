@@ -17,7 +17,7 @@ A segmentation fault occurs when following conditions are met.
 ### DNS bug #2
 A segmentation fault occurs when following conditions are met.
 
-* _number of Answer Record_ is larger than 1
+* _number of Answer Record_ is at least 2
 * _Data Length_ of _Answer Record_ is too large
 
 
