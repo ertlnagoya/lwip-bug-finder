@@ -44,7 +44,7 @@ readline==6.2.4.1
 requests==2.18.4
 rpyc==3.4.4
 scandir==1.6
-scapy==2.3.3
+scapy==2.4.1
 simplegeneric==0.8.1
 six==1.11.0
 traitlets==4.3.2
