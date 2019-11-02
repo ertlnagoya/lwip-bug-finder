@@ -41,7 +41,7 @@ pygit==0.1
 Pygments==2.2.0
 pyvex==7.7.9.14
 readline==6.2.4.1
-requests==2.18.4
+requests==2.20.0
 rpyc==3.4.4
 scandir==1.6
 scapy==2.3.3
