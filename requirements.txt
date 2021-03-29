@@ -38,7 +38,7 @@ ptyprocess==0.5.2
 pycparser==2.18
 pyelftools==0.24
 pygit==0.1
-Pygments==2.2.0
+Pygments==2.7.4
 pyvex==7.7.9.14
 readline==6.2.4.1
 requests==2.18.4
